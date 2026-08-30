@@ -15,11 +15,15 @@ from uuid import uuid4
 
 
 class EventType(StrEnum):
-    """Observable event types supported by the Phase 2 trace model."""
+    """Observable event types supported by the DataPilot trace model."""
 
     USER_QUERY = "USER_QUERY"
     STATE_CREATED = "STATE_CREATED"
     PLANNER = "PLANNER"
+    PLANNER_STARTED = "PLANNER_STARTED"
+    PLANNER_RESULT = "PLANNER_RESULT"
+    PLANNER_RETRY = "PLANNER_RETRY"
+    PLANNER_FAILED = "PLANNER_FAILED"
     TOOL_CALL = "TOOL_CALL"
     TOOL_RESULT = "TOOL_RESULT"
     SQL = "SQL"

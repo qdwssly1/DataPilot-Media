@@ -1,19 +1,21 @@
-"""Interactive CLI skeleton for DataPilot Phase 2."""
+"""Interactive CLI for the DataPilot Planner."""
 
 from __future__ import annotations
 
-import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from typing import Any
 
+from datapilot.agent.planner import Planner, PlannerError, PlannerResult
 from datapilot.agent.state import AgentState, create_initial_state
+from datapilot.llm.openai_compatible import OpenAICompatiblePlannerModel
 from datapilot.tracing.trace import EventType, TraceCollector
 
 PROMPT = "DataPilot > "
 EXIT_COMMANDS = frozenset({"exit", "quit"})
-WORKFLOW_NOT_IMPLEMENTED = "Agent workflow is not implemented yet."
+PLANNER_CONFIGURATION_REQUIRED = "Planner requires LLM configuration."
+PLANNER_CONFIGURATION_HELP = "Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL."
 
 
 @dataclass(slots=True)
@@ -22,6 +24,15 @@ class InitializationResult:
 
     state: AgentState
     trace: TraceCollector
+
+
+@dataclass(slots=True)
+class PlannerExecutionResult:
+    """State, trace, and structured result from one Planner execution."""
+
+    state: AgentState
+    trace: TraceCollector
+    planner_result: PlannerResult
 
 
 def process_input(user_query: str) -> InitializationResult:
@@ -50,6 +61,21 @@ def process_input(user_query: str) -> InitializationResult:
     return InitializationResult(state=state, trace=trace)
 
 
+def process_planner_input(
+    user_query: str,
+    planner: Planner,
+) -> PlannerExecutionResult:
+    """Initialize one request and run only the Planner component."""
+
+    initialized = process_input(user_query)
+    planner_result = planner.plan(initialized.state, trace=initialized.trace)
+    return PlannerExecutionResult(
+        state=initialized.state,
+        trace=initialized.trace,
+        planner_result=planner_result,
+    )
+
+
 def _json_ready(value: Any) -> Any:
     """Convert state values to standard JSON-compatible structures."""
 
@@ -70,12 +96,35 @@ def state_snapshot(state: AgentState) -> dict[str, Any]:
     return {key: _json_ready(value) for key, value in state.items()}
 
 
+def format_planner_result(result: PlannerResult) -> str:
+    """Render a validated plan without inventing SQL or data results."""
+
+    lines = [
+        "[Planner]",
+        f"Intent: {result.intent.value}",
+        f"Reason: {result.reason_summary}",
+        "",
+        "Tasks:",
+    ]
+    for index, task in enumerate(result.tasks, start=1):
+        dependencies = ", ".join(task.depends_on) or "none"
+        lines.append(
+            f"{index}. [{task.task_type}] {task.description} "
+            f"(depends_on: {dependencies})"
+        )
+    return "\n".join(lines)
+
+
 def run_cli(
     *,
     input_fn: Callable[[str], str] = input,
     output_fn: Callable[[str], None] = print,
+    planner: Planner | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> int:
-    """Run the Phase 2 interactive loop until the user exits."""
+    """Run the Planner demo loop until the user exits."""
+
+    active_planner = planner
 
     while True:
         try:
@@ -95,12 +144,21 @@ def run_cli(
         if not query:
             continue
 
-        result = process_input(query)
-        rendered_state = json.dumps(
-            state_snapshot(result.state), ensure_ascii=False, indent=2
-        )
-        output_fn(rendered_state)
-        output_fn(WORKFLOW_NOT_IMPLEMENTED)
+        if active_planner is None:
+            try:
+                model_client = OpenAICompatiblePlannerModel.from_env(environ)
+            except PlannerError:
+                output_fn(PLANNER_CONFIGURATION_REQUIRED)
+                output_fn(PLANNER_CONFIGURATION_HELP)
+                continue
+            active_planner = Planner(model_client=model_client)
+
+        try:
+            result = process_planner_input(query, active_planner)
+        except PlannerError as exc:
+            output_fn(f"Planner failed: {exc}")
+            continue
+        output_fn(format_planner_result(result.planner_result))
 
 
 def main() -> int:

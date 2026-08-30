@@ -1,14 +1,16 @@
-"""Non-executable DataPilot graph skeleton.
+"""DataPilot graph skeleton with a real Planner node.
 
-The node names and edges reserve a stable shape for later phases. No node
-pretends to plan, generate SQL, review results, or analyze an answer yet.
+The Planner node is executable. SQL Agent, Reviewer, and Analyst remain clear
+stubs and the graph stops before any SQL generation or execution.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from datapilot.agent.planner import Planner, PlannerResult
 from datapilot.agent.state import AgentState
+from datapilot.tracing.trace import TraceCollector
 
 GRAPH_NODES = ("start", "planner", "sql_agent", "reviewer", "analyst", "end")
 GRAPH_EDGES = tuple(zip(GRAPH_NODES[:-1], GRAPH_NODES[1:], strict=True))
@@ -16,18 +18,30 @@ GRAPH_EDGES = tuple(zip(GRAPH_NODES[:-1], GRAPH_NODES[1:], strict=True))
 
 @dataclass(frozen=True, slots=True)
 class GraphSkeleton:
-    """Declarative placeholder for the future LangGraph application."""
+    """Execute planning, then stop at the unimplemented SQL Agent boundary."""
 
+    planner: Planner
     nodes: tuple[str, ...] = GRAPH_NODES
     edges: tuple[tuple[str, str], ...] = GRAPH_EDGES
 
-    def run(self, state: AgentState) -> AgentState:
-        """Reject execution until real graph nodes are implemented."""
+    def run_planner(
+        self,
+        state: AgentState,
+        *,
+        trace: TraceCollector,
+    ) -> PlannerResult:
+        """Run the real Planner node and return its structured result."""
 
-        raise NotImplementedError("DataPilot agent workflow is not implemented yet")
+        return self.planner.plan(state, trace=trace)
+
+    def run(self, state: AgentState, *, trace: TraceCollector) -> AgentState:
+        """Run Planner and reject transition into the future SQL Agent."""
+
+        self.run_planner(state, trace=trace)
+        raise NotImplementedError("DataPilot SQL Agent is not implemented yet")
 
 
-def build_graph() -> GraphSkeleton:
-    """Return the explicit, non-executable Phase 2 graph structure."""
+def build_graph(planner: Planner) -> GraphSkeleton:
+    """Inject the Planner into the explicit Phase 3 graph structure."""
 
-    return GraphSkeleton()
+    return GraphSkeleton(planner=planner)

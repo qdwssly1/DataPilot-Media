@@ -13,6 +13,7 @@ from uuid import uuid4
 
 MessageRole = Literal["user", "assistant", "system", "tool"]
 TaskStatus = Literal["pending", "in_progress", "completed", "failed"]
+TaskType = Literal["query", "analysis", "response"]
 
 
 @dataclass(slots=True)
@@ -29,6 +30,8 @@ class TaskItem:
 
     task_id: str
     description: str
+    task_type: TaskType = "analysis"
+    depends_on: list[str] = field(default_factory=list)
     status: TaskStatus = "pending"
 
 
