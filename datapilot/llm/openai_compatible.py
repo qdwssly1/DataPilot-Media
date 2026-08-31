@@ -1,4 +1,4 @@
-"""Minimal OpenAI-compatible Chat Completions client for the Planner."""
+"""Minimal OpenAI-compatible Chat Completions client for DataPilot agents."""
 
 from __future__ import annotations
 
@@ -99,20 +99,19 @@ class OpenAICompatiblePlannerModel:
             with urlopen(request, timeout=self.timeout) as response:
                 response_data = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
-            raise PlannerError(
-                f"planner API returned HTTP status {exc.code}"
-            ) from exc
+            raise PlannerError(f"LLM API returned HTTP status {exc.code}") from exc
         except (URLError, TimeoutError) as exc:
-            raise PlannerError("planner API request failed") from exc
+            raise PlannerError("LLM API request failed") from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise PlannerError("planner API returned invalid JSON") from exc
+            raise PlannerError("LLM API returned invalid JSON") from exc
 
         try:
             content = response_data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise PlannerError(
-                "planner API response is missing message content"
-            ) from exc
+            raise PlannerError("LLM API response is missing message content") from exc
         if not isinstance(content, str) or not content.strip():
-            raise PlannerError("planner API returned empty message content")
+            raise PlannerError("LLM API returned empty message content")
         return content
+
+
+OpenAICompatibleModel = OpenAICompatiblePlannerModel

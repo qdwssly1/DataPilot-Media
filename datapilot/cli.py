@@ -1,4 +1,4 @@
-"""Interactive CLI for the DataPilot Planner."""
+"""Interactive CLI for the implemented DataPilot Planner and SQL Agent."""
 
 from __future__ import annotations
 
@@ -7,15 +7,20 @@ from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from typing import Any
 
+from datapilot.agent.graph import execute_ready_query_tasks
 from datapilot.agent.planner import Planner, PlannerError, PlannerResult
-from datapilot.agent.state import AgentState, create_initial_state
+from datapilot.agent.sql_agent import SQLAgent, SQLAgentError, WrenTools
+from datapilot.agent.state import AgentState, SQLResult, TaskItem, create_initial_state
 from datapilot.llm.openai_compatible import OpenAICompatiblePlannerModel
+from datapilot.tools.wren_tools import WrenConfigurationError, WrenToolAdapter
 from datapilot.tracing.trace import EventType, TraceCollector
 
 PROMPT = "DataPilot > "
 EXIT_COMMANDS = frozenset({"exit", "quit"})
 PLANNER_CONFIGURATION_REQUIRED = "Planner requires LLM configuration."
 PLANNER_CONFIGURATION_HELP = "Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL."
+WREN_RUNTIME_NOT_CONFIGURED = "Wren runtime/data source is not configured."
+REVIEW_BOUNDARY = "Reviewer and Analyst are not implemented yet."
 
 
 @dataclass(slots=True)
@@ -115,16 +120,49 @@ def format_planner_result(result: PlannerResult) -> str:
     return "\n".join(lines)
 
 
+def format_sql_result(task: TaskItem, result: SQLResult) -> str:
+    """Render observable SQL Agent stages without generating an answer."""
+
+    lines = [
+        "[SQL Agent]",
+        f"Task: {task.task_id} - {task.description}",
+        "",
+        "[Context]",
+        result.context_summary or "Unavailable",
+    ]
+    if not result.success:
+        lines.extend(["", "[Execution]", f"Failed: {result.error}"])
+        return "\n".join(lines)
+    lines.extend(
+        [
+            "",
+            "[SQL]",
+            result.sql,
+            "",
+            "[Dry Plan]",
+            "Success",
+            "",
+            "[Execution]",
+            f"Rows: {result.row_count}",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def run_cli(
     *,
     input_fn: Callable[[str], str] = input,
     output_fn: Callable[[str], None] = print,
     planner: Planner | None = None,
+    sql_agent: SQLAgent | None = None,
+    wren_tools: WrenTools | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> int:
-    """Run the Planner demo loop until the user exits."""
+    """Run implemented nodes until the review boundary or user exit."""
 
     active_planner = planner
+    active_sql_agent = sql_agent
+    active_wren_tools = wren_tools
 
     while True:
         try:
@@ -159,6 +197,34 @@ def run_cli(
             output_fn(f"Planner failed: {exc}")
             continue
         output_fn(format_planner_result(result.planner_result))
+
+        if active_sql_agent is None:
+            if active_wren_tools is None:
+                try:
+                    active_wren_tools = WrenToolAdapter.from_env(environ)
+                except WrenConfigurationError:
+                    output_fn(WREN_RUNTIME_NOT_CONFIGURED)
+                    continue
+            active_sql_agent = SQLAgent(
+                model_client=active_planner.model_client,
+                wren_tools=active_wren_tools,
+            )
+
+        task_by_id = {task.task_id: task for task in result.state["task_plan"]}
+        try:
+            sql_results = execute_ready_query_tasks(
+                result.state,
+                active_sql_agent,
+                trace=result.trace,
+            )
+        except SQLAgentError as exc:
+            output_fn(f"SQL Agent failed: {exc}")
+            continue
+        for sql_result in sql_results:
+            output_fn(format_sql_result(task_by_id[sql_result.task_id], sql_result))
+        if any(not sql_result.success for sql_result in sql_results):
+            continue
+        output_fn(REVIEW_BOUNDARY)
 
 
 def main() -> int:

@@ -3,15 +3,19 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from datapilot.agent.sql_agent import SQLAgent
 from datapilot.agent.planner import Planner
 from datapilot.cli import (
     PLANNER_CONFIGURATION_HELP,
     PLANNER_CONFIGURATION_REQUIRED,
     PROMPT,
+    REVIEW_BOUNDARY,
+    WREN_RUNTIME_NOT_CONFIGURED,
     process_input,
     run_cli,
     state_snapshot,
 )
+from datapilot.tools.wren_tools import WrenQueryResult
 from datapilot.tracing.trace import EventType
 
 
@@ -41,6 +45,49 @@ class StaticPlannerModel:
                 "requires_context": False,
                 "is_follow_up": False,
             }
+        )
+
+
+class StaticSQLModel:
+    def complete(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+    ) -> str:
+        del system_prompt, user_prompt, response_schema
+        return json.dumps(
+            {
+                "sql": "SELECT SUM(gmv) AS gmv FROM orders",
+                "summary": "Retrieve July GMV.",
+            }
+        )
+
+
+class FakeWrenTools:
+    def fetch_context(self, question: str, *, limit: int = 5) -> dict[str, Any]:
+        del question, limit
+        return {"strategy": "full", "schema": "orders(gmv decimal)"}
+
+    def recall_queries(
+        self,
+        question: str,
+        *,
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        del question, limit
+        return []
+
+    def dry_plan(self, sql: str) -> str:
+        return f"planned: {sql}"
+
+    def query(self, sql: str, *, limit: int = 100) -> WrenQueryResult:
+        del sql, limit
+        return WrenQueryResult(
+            columns=["gmv"],
+            rows=[{"gmv": 42}],
+            row_count=1,
         )
 
 
@@ -111,6 +158,36 @@ def test_cli_prints_real_planner_result_from_injected_model() -> None:
     assert "Intent: single_query" in outputs[0]
     assert "Retrieve July GMV." in outputs[0]
     assert "SELECT" not in outputs[0].upper()
+    assert outputs[1] == WREN_RUNTIME_NOT_CONFIGURED
+
+
+def test_cli_runs_sql_agent_without_fake_final_answer() -> None:
+    inputs = iter(["分析 7 月 GMV", "exit"])
+    outputs: list[str] = []
+    planner = Planner(model_client=StaticPlannerModel())
+    sql_agent = SQLAgent(
+        model_client=StaticSQLModel(),
+        wren_tools=FakeWrenTools(),
+    )
+
+    exit_code = run_cli(
+        input_fn=lambda _: next(inputs),
+        output_fn=outputs.append,
+        planner=planner,
+        sql_agent=sql_agent,
+        environ={},
+    )
+
+    assert exit_code == 0
+    assert "[Planner]" in outputs[0]
+    assert "[SQL Agent]" in outputs[1]
+    assert "[Context]" in outputs[1]
+    assert "[SQL]" in outputs[1]
+    assert "[Dry Plan]\nSuccess" in outputs[1]
+    assert "[Execution]\nRows: 1" in outputs[1]
+    assert outputs[2] == REVIEW_BOUNDARY
+    assert outputs[3] == "Goodbye."
+    assert not any("final answer" in output.lower() for output in outputs)
 
 
 def test_cli_quit_exits_without_creating_state() -> None:

@@ -45,13 +45,18 @@ class BusinessContext:
 
 @dataclass(slots=True)
 class SQLResult:
-    """Structured result produced by a future SQL execution step."""
+    """Bounded, structured result produced by the SQL Agent."""
 
     task_id: str
     sql: str
+    success: bool = True
     columns: list[str] = field(default_factory=list)
     rows: list[dict[str, Any]] = field(default_factory=list)
+    row_count: int = 0
     error: str | None = None
+    retry_count: int = 0
+    execution_time: float = 0.0
+    context_summary: str = ""
 
 
 @dataclass(slots=True)
