@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from datapilot.agent.graph import execute_ready_query_tasks
+from datapilot.agent.reviewer import Reviewer
 from datapilot.agent.sql_agent import (
     SQLAgent,
     SQLAgentError,
@@ -106,12 +107,31 @@ class FakeWrenTools:
             raise outcome
         return outcome
 
-    def store_query(self, nl: str, sql: str) -> None:
+    def store_query(
+        self,
+        nl: str,
+        sql: str,
+        *,
+        tags: list[str] | None = None,
+    ) -> None:
+        del tags
         self.store_calls.append((nl, sql))
 
 
 def _response(sql: str, summary: str = "Retrieve the requested metric.") -> str:
     return json.dumps({"sql": sql, "summary": summary})
+
+
+def _approve_response() -> str:
+    return json.dumps(
+        {
+            "decision": "approve",
+            "reason_summary": "The result supports the query task.",
+            "issues": [],
+            "retry_instruction": None,
+            "confidence": 0.95,
+        }
+    )
 
 
 def _state_for(*tasks: TaskItem) -> tuple[Any, TraceCollector]:
@@ -361,7 +381,7 @@ def test_sql_agent_invalid_structured_output_fails_after_retry() -> None:
     assert trace.get_events()[-1].metadata["error_type"] == "SQLGenerationError"
 
 
-def test_sql_agent_updates_state_on_success() -> None:
+def test_sql_agent_updates_provisional_state_on_success() -> None:
     task = _query_task()
     state, trace = _state_for(task)
 
@@ -372,10 +392,10 @@ def test_sql_agent_updates_state_on_success() -> None:
 
     assert state["generated_sql"] == [result.sql]
     assert state["sql_results"] == [result]
-    assert state["completed_tasks"] == [task]
-    assert state["pending_tasks"] == []
-    assert state["current_task"] is None
-    assert task.status == "completed"
+    assert state["completed_tasks"] == []
+    assert state["pending_tasks"] == [task]
+    assert state["current_task"] is task
+    assert task.status == "executed"
 
 
 def test_sql_agent_preserves_state_on_failure() -> None:
@@ -431,8 +451,16 @@ def test_sql_agent_handles_multiple_query_tasks() -> None:
         [_response("SELECT 1 AS value"), _response("SELECT 2 AS value")]
     )
     agent = SQLAgent(model_client=model, wren_tools=FakeWrenTools())
+    reviewer = Reviewer(
+        model_client=FakeSQLModel([_approve_response(), _approve_response()])
+    )
 
-    results = execute_ready_query_tasks(state, agent, trace=trace)
+    results = execute_ready_query_tasks(
+        state,
+        agent,
+        reviewer,
+        trace=trace,
+    )
 
     assert len(results) == 2
     assert [task.task_id for task in state["completed_tasks"]] == [
@@ -453,6 +481,7 @@ def test_sql_agent_does_not_execute_analysis_task() -> None:
     results = execute_ready_query_tasks(
         state,
         SQLAgent(model_client=model, wren_tools=tools),
+        Reviewer(model_client=FakeSQLModel([])),
         trace=trace,
     )
 

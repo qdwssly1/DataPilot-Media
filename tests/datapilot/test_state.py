@@ -25,6 +25,7 @@ def test_create_initial_state() -> None:
     assert state["sql_results"] == []
     assert state["retry_count"] == 0
     assert state["review_result"] is None
+    assert state["review_results"] == []
     assert state["final_answer"] is None
     assert state["session_context"].turn_number == 1
 

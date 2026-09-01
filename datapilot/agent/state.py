@@ -12,8 +12,28 @@ from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
 MessageRole = Literal["user", "assistant", "system", "tool"]
-TaskStatus = Literal["pending", "in_progress", "completed", "failed"]
+TaskStatus = Literal[
+    "pending",
+    "in_progress",
+    "executing",
+    "executed",
+    "reviewing",
+    "completed",
+    "failed",
+]
 TaskType = Literal["query", "analysis", "response"]
+ReviewDecision = Literal["approve", "retry", "fail"]
+ReviewIssueType = Literal[
+    "metric_mismatch",
+    "dimension_mismatch",
+    "time_range_mismatch",
+    "filter_mismatch",
+    "aggregation_mismatch",
+    "join_mismatch",
+    "missing_data",
+    "result_mismatch",
+    "other",
+]
 
 
 @dataclass(slots=True)
@@ -55,17 +75,34 @@ class SQLResult:
     row_count: int = 0
     error: str | None = None
     retry_count: int = 0
+    semantic_retry_count: int = 0
     execution_time: float = 0.0
     context_summary: str = ""
 
 
 @dataclass(slots=True)
-class ReviewResult:
-    """Structured decision produced by a future reviewer node."""
+class ReviewerIssue:
+    """One bounded semantic problem identified by the Reviewer."""
 
-    approved: bool
-    summary: str
-    issues: list[str] = field(default_factory=list)
+    issue_type: ReviewIssueType
+    description: str
+
+
+@dataclass(slots=True)
+class ReviewerResult:
+    """Strict semantic decision for one task and one SQL result."""
+
+    task_id: str
+    decision: ReviewDecision
+    reason_summary: str
+    issues: list[ReviewerIssue] = field(default_factory=list)
+    retry_instruction: str | None = None
+    confidence: float = 0.0
+    review_retry_count: int = 0
+
+
+# Phase 4 exposed this name; keep it as a compatibility alias.
+ReviewResult = ReviewerResult
 
 
 @dataclass(slots=True)
@@ -90,7 +127,8 @@ class AgentState(TypedDict):
     generated_sql: list[str]
     sql_results: list[SQLResult]
     retry_count: int
-    review_result: ReviewResult | None
+    review_result: ReviewerResult | None
+    review_results: list[ReviewerResult]
     final_answer: str | None
     session_context: SessionContext
     trace_id: str
@@ -124,6 +162,7 @@ def create_initial_state(
         sql_results=[],
         retry_count=0,
         review_result=None,
+        review_results=[],
         final_answer=None,
         session_context=SessionContext(),
         trace_id=trace_id or str(uuid4()),

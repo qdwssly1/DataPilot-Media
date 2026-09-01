@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Protocol
 
-from datapilot.agent.state import AgentState, SQLResult, TaskItem
+from datapilot.agent.state import AgentState, ReviewerResult, SQLResult, TaskItem
 from datapilot.tools.wren_tools import WrenQueryResult
 from datapilot.tracing.trace import EventType, TraceCollector
 
@@ -47,6 +47,14 @@ class WrenTools(Protocol):
     def dry_plan(self, sql: str) -> str: ...
 
     def query(self, sql: str, *, limit: int = 100) -> WrenQueryResult: ...
+
+    def store_query(
+        self,
+        nl: str,
+        sql: str,
+        *,
+        tags: list[str] | None = None,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,23 +314,6 @@ def is_task_ready(state: AgentState, task: TaskItem) -> bool:
     )
 
 
-def _next_ready_task(state: AgentState) -> TaskItem | None:
-    completed_ids = {
-        item.task_id for item in state["completed_tasks"] if item.status == "completed"
-    }
-    pending_ids = {item.task_id for item in state["pending_tasks"]}
-    return next(
-        (
-            task
-            for task in state["task_plan"]
-            if task.task_id in pending_ids
-            and task.status == "pending"
-            and set(task.depends_on) <= completed_ids
-        ),
-        None,
-    )
-
-
 class SQLAgent:
     """Generate and execute one ready query task through Wren."""
 
@@ -351,6 +342,9 @@ class SQLAgent:
         task: TaskItem,
         *,
         trace: TraceCollector | None = None,
+        semantic_feedback: ReviewerResult | None = None,
+        previous_result: SQLResult | None = None,
+        semantic_retry_count: int = 0,
     ) -> SQLResult:
         """Run Context, Memory, generation, dry-plan, and query in order."""
 
@@ -359,6 +353,17 @@ class SQLAgent:
             raise ValueError("a TraceCollector is required")
         if active_trace.trace_id != state["trace_id"]:
             raise ValueError("trace and state must use the same trace_id")
+        if semantic_retry_count < 0:
+            raise ValueError("semantic_retry_count must not be negative")
+        if (semantic_feedback is None) != (previous_result is None):
+            raise ValueError(
+                "semantic_feedback and previous_result must be supplied together"
+            )
+        if semantic_feedback is not None:
+            if semantic_feedback.decision != "retry":
+                raise ValueError("semantic correction requires a retry decision")
+            if previous_result is None or previous_result.task_id != task.task_id:
+                raise ValueError("semantic correction result must match the task")
 
         started_at = perf_counter()
         self._add_event(
@@ -384,6 +389,7 @@ class SQLAgent:
                 error_type=type(error).__name__,
             )
             raise error
+        task.status = "executing"
 
         try:
             context_started = perf_counter()
@@ -401,6 +407,7 @@ class SQLAgent:
                 error=error,
                 sql="",
                 retry_count=0,
+                semantic_retry_count=semantic_retry_count,
                 context_summary="",
                 started_at=started_at,
                 trace=active_trace,
@@ -458,6 +465,8 @@ class SQLAgent:
                     previous_sql=previous_sql,
                     previous_error=previous_error,
                     attempt=attempt,
+                    semantic_feedback=semantic_feedback,
+                    previous_result=previous_result,
                 )
                 previous_sql = generated.sql
                 self._add_event(
@@ -575,6 +584,7 @@ class SQLAgent:
                     rows=list(query_result.rows),
                     row_count=query_result.row_count,
                     retry_count=attempt - 1,
+                    semantic_retry_count=semantic_retry_count,
                     execution_time=perf_counter() - started_at,
                     context_summary=context_summary,
                 )
@@ -621,9 +631,33 @@ class SQLAgent:
             error=last_error,
             sql=previous_sql,
             retry_count=self.max_attempts - 1,
+            semantic_retry_count=semantic_retry_count,
             context_summary=context_summary,
             started_at=started_at,
             trace=active_trace,
+        )
+
+    def execute_correction(
+        self,
+        state: AgentState,
+        task: TaskItem,
+        previous_result: SQLResult,
+        feedback: ReviewerResult,
+        *,
+        trace: TraceCollector | None = None,
+        semantic_retry_count: int = 1,
+    ) -> SQLResult:
+        """Generate one new SQL version from bounded Reviewer feedback."""
+
+        if semantic_retry_count != 1:
+            raise ValueError("semantic_retry_count must be exactly 1")
+        return self.execute_task(
+            state,
+            task,
+            trace=trace,
+            semantic_feedback=feedback,
+            previous_result=previous_result,
+            semantic_retry_count=semantic_retry_count,
         )
 
     def _generate_sql(
@@ -636,6 +670,8 @@ class SQLAgent:
         previous_sql: str,
         previous_error: str,
         attempt: int,
+        semantic_feedback: ReviewerResult | None,
+        previous_result: SQLResult | None,
     ) -> GeneratedSQL:
         prompt = (
             f"Original user query:\n{state['original_query']}\n\n"
@@ -644,6 +680,24 @@ class SQLAgent:
             "Historical verified queries:\n"
             f"{_compact_json(recalled_queries, max_chars=4000)}"
         )
+        if semantic_feedback is not None and previous_result is not None:
+            issues = [
+                {
+                    "issue_type": item.issue_type,
+                    "description": item.description,
+                }
+                for item in semantic_feedback.issues
+            ]
+            prompt += (
+                "\n\nSemantic correction context:\n"
+                "Action: Generate one corrected read-only SQL query.\n"
+                f"Observation: Previous SQL was {previous_result.sql}. "
+                f"It returned columns {previous_result.columns} and "
+                f"row_count {previous_result.row_count}.\n"
+                f"Reviewer issues: {_compact_json(issues, max_chars=2000)}\n"
+                f"Retry instruction: {semantic_feedback.retry_instruction}\n"
+                "Do not answer the user; return the corrected SQL JSON only."
+            )
         if previous_error:
             prompt += (
                 "\n\nRetry context:\n"
@@ -675,15 +729,11 @@ class SQLAgent:
         task: TaskItem,
         result: SQLResult,
     ) -> None:
-        task.status = "completed"
+        # Execution is provisional until the Semantic Reviewer approves it.
+        task.status = "executed"
         state["generated_sql"].append(result.sql)
         state["sql_results"].append(result)
-        if all(item.task_id != task.task_id for item in state["completed_tasks"]):
-            state["completed_tasks"].append(task)
-        state["pending_tasks"] = [
-            item for item in state["pending_tasks"] if item.task_id != task.task_id
-        ]
-        state["current_task"] = _next_ready_task(state)
+        state["current_task"] = task
 
     def _record_failure(
         self,
@@ -693,6 +743,7 @@ class SQLAgent:
         error: SQLAgentError,
         sql: str,
         retry_count: int,
+        semantic_retry_count: int = 0,
         context_summary: str,
         started_at: float,
         trace: TraceCollector,
@@ -703,9 +754,12 @@ class SQLAgent:
             success=False,
             error=error.summary,
             retry_count=retry_count,
+            semantic_retry_count=semantic_retry_count,
             execution_time=perf_counter() - started_at,
             context_summary=context_summary,
         )
+        task.status = "pending"
+        state["current_task"] = task
         state["sql_results"].append(result)
         self._add_event(
             trace,

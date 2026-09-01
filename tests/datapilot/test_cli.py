@@ -5,6 +5,7 @@ from typing import Any
 
 from datapilot.agent.sql_agent import SQLAgent
 from datapilot.agent.planner import Planner
+from datapilot.agent.reviewer import Reviewer
 from datapilot.cli import (
     PLANNER_CONFIGURATION_HELP,
     PLANNER_CONFIGURATION_REQUIRED,
@@ -65,6 +66,41 @@ class StaticSQLModel:
         )
 
 
+class StaticReviewerModel:
+    def complete(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+    ) -> str:
+        del system_prompt, user_prompt, response_schema
+        return json.dumps(
+            {
+                "decision": "approve",
+                "reason_summary": "The SQL result supports the task.",
+                "issues": [],
+                "retry_instruction": None,
+                "confidence": 0.95,
+            }
+        )
+
+
+class SequenceModel:
+    def __init__(self, responses: list[str]) -> None:
+        self.responses = list(responses)
+
+    def complete(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+    ) -> str:
+        del system_prompt, user_prompt, response_schema
+        return self.responses.pop(0)
+
+
 class FakeWrenTools:
     def fetch_context(self, question: str, *, limit: int = 5) -> dict[str, Any]:
         del question, limit
@@ -89,6 +125,15 @@ class FakeWrenTools:
             rows=[{"gmv": 42}],
             row_count=1,
         )
+
+    def store_query(
+        self,
+        nl: str,
+        sql: str,
+        *,
+        tags: list[str] | None = None,
+    ) -> None:
+        del nl, sql, tags
 
 
 def test_cli_state_initialization() -> None:
@@ -169,12 +214,14 @@ def test_cli_runs_sql_agent_without_fake_final_answer() -> None:
         model_client=StaticSQLModel(),
         wren_tools=FakeWrenTools(),
     )
+    reviewer = Reviewer(model_client=StaticReviewerModel())
 
     exit_code = run_cli(
         input_fn=lambda _: next(inputs),
         output_fn=outputs.append,
         planner=planner,
         sql_agent=sql_agent,
+        reviewer=reviewer,
         environ={},
     )
 
@@ -185,8 +232,67 @@ def test_cli_runs_sql_agent_without_fake_final_answer() -> None:
     assert "[SQL]" in outputs[1]
     assert "[Dry Plan]\nSuccess" in outputs[1]
     assert "[Execution]\nRows: 1" in outputs[1]
-    assert outputs[2] == REVIEW_BOUNDARY
-    assert outputs[3] == "Goodbye."
+    assert "[Reviewer]" in outputs[2]
+    assert "Decision: approve" in outputs[2]
+    assert outputs[3] == REVIEW_BOUNDARY
+    assert outputs[4] == "Goodbye."
+    assert not any("final answer" in output.lower() for output in outputs)
+
+
+def test_cli_displays_semantic_retry_without_final_answer() -> None:
+    inputs = iter(["分析 7 月 GMV", "exit"])
+    outputs: list[str] = []
+    sql_model = SequenceModel(
+        [
+            json.dumps({"sql": "SELECT COUNT(*) FROM orders", "summary": "Count."}),
+            json.dumps(
+                {
+                    "sql": "SELECT SUM(gmv) AS gmv FROM orders",
+                    "summary": "Calculate GMV.",
+                }
+            ),
+        ]
+    )
+    reviewer_model = SequenceModel(
+        [
+            json.dumps(
+                {
+                    "decision": "retry",
+                    "reason_summary": "COUNT(*) is not GMV.",
+                    "issues": [
+                        {
+                            "issue_type": "metric_mismatch",
+                            "description": "COUNT(*) is not GMV.",
+                        }
+                    ],
+                    "retry_instruction": "Use SUM(gmv).",
+                    "confidence": 0.99,
+                }
+            ),
+            StaticReviewerModel().complete(
+                system_prompt="",
+                user_prompt="",
+                response_schema={},
+            ),
+        ]
+    )
+
+    exit_code = run_cli(
+        input_fn=lambda _: next(inputs),
+        output_fn=outputs.append,
+        planner=Planner(model_client=StaticPlannerModel()),
+        sql_agent=SQLAgent(model_client=sql_model, wren_tools=FakeWrenTools()),
+        reviewer=Reviewer(model_client=reviewer_model),
+        environ={},
+    )
+
+    assert exit_code == 0
+    assert "[Reviewer]\nDecision: retry" in outputs[2]
+    assert "Issue: metric_mismatch" in outputs[2]
+    assert "[SQL Agent Retry]" in outputs[3]
+    assert "Decision: approve" in outputs[4]
+    assert outputs[5] == REVIEW_BOUNDARY
+    assert outputs[6] == "Goodbye."
     assert not any("final answer" in output.lower() for output in outputs)
 
 

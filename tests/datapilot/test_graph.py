@@ -8,6 +8,7 @@ import pytest
 
 from datapilot.agent.graph import build_graph
 from datapilot.agent.planner import Planner, PlannerIntent
+from datapilot.agent.reviewer import Reviewer
 from datapilot.agent.sql_agent import SQLAgent
 from datapilot.agent.state import create_initial_state
 from datapilot.tools.wren_tools import WrenQueryResult
@@ -58,6 +59,26 @@ class StaticSQLModel:
         return json.dumps({"sql": self.sql, "summary": "Retrieve the metric."})
 
 
+class StaticReviewerModel:
+    def complete(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: Mapping[str, Any],
+    ) -> str:
+        del system_prompt, user_prompt, response_schema
+        return json.dumps(
+            {
+                "decision": "approve",
+                "reason_summary": "The result supports the task.",
+                "issues": [],
+                "retry_instruction": None,
+                "confidence": 0.95,
+            }
+        )
+
+
 class FakeWrenTools:
     def fetch_context(self, question: str, *, limit: int = 5) -> dict[str, Any]:
         del question, limit
@@ -83,6 +104,15 @@ class FakeWrenTools:
             row_count=1,
         )
 
+    def store_query(
+        self,
+        nl: str,
+        sql: str,
+        *,
+        tags: list[str] | None = None,
+    ) -> None:
+        del nl, sql, tags
+
 
 def _graph(trace: TraceCollector, *, sql: str = "SELECT value FROM metrics") -> Any:
     return build_graph(
@@ -93,6 +123,7 @@ def _graph(trace: TraceCollector, *, sql: str = "SELECT value FROM metrics") -> 
             trace=trace,
             max_attempts=1,
         ),
+        Reviewer(model_client=StaticReviewerModel(), trace=trace),
     )
 
 
@@ -111,7 +142,7 @@ def test_graph_runs_real_planner_node() -> None:
     ]
 
 
-def test_graph_runs_sql_agent_then_stops_before_reviewer() -> None:
+def test_graph_runs_reviewer_then_stops_before_analyst() -> None:
     state = create_initial_state("show sales")
     trace = TraceCollector(trace_id=state["trace_id"])
     graph = _graph(trace)
@@ -126,13 +157,14 @@ def test_graph_runs_sql_agent_then_stops_before_reviewer() -> None:
     )
     with pytest.raises(
         NotImplementedError,
-        match="Reviewer and Analyst are not implemented yet",
+        match="Analyst is not implemented yet",
     ):
         graph.run(state, trace=trace)
 
     assert state["generated_sql"] == ["SELECT value FROM metrics"]
     assert state["sql_results"][0].success is True
     assert state["completed_tasks"][0].task_id == "task_1"
+    assert state["review_result"].decision == "approve"
 
 
 def test_graph_returns_failed_sql_state_without_entering_review() -> None:

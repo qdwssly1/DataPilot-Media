@@ -1,4 +1,4 @@
-"""Interactive CLI for the implemented DataPilot Planner and SQL Agent."""
+"""Interactive CLI through DataPilot planning, SQL, and semantic review."""
 
 from __future__ import annotations
 
@@ -9,8 +9,15 @@ from typing import Any
 
 from datapilot.agent.graph import execute_ready_query_tasks
 from datapilot.agent.planner import Planner, PlannerError, PlannerResult
+from datapilot.agent.reviewer import Reviewer, ReviewerError
 from datapilot.agent.sql_agent import SQLAgent, SQLAgentError, WrenTools
-from datapilot.agent.state import AgentState, SQLResult, TaskItem, create_initial_state
+from datapilot.agent.state import (
+    AgentState,
+    ReviewerResult,
+    SQLResult,
+    TaskItem,
+    create_initial_state,
+)
 from datapilot.llm.openai_compatible import OpenAICompatiblePlannerModel
 from datapilot.tools.wren_tools import WrenConfigurationError, WrenToolAdapter
 from datapilot.tracing.trace import EventType, TraceCollector
@@ -20,7 +27,8 @@ EXIT_COMMANDS = frozenset({"exit", "quit"})
 PLANNER_CONFIGURATION_REQUIRED = "Planner requires LLM configuration."
 PLANNER_CONFIGURATION_HELP = "Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL."
 WREN_RUNTIME_NOT_CONFIGURED = "Wren runtime/data source is not configured."
-REVIEW_BOUNDARY = "Reviewer and Analyst are not implemented yet."
+ANALYST_BOUNDARY = "Analyst is not implemented yet."
+REVIEW_BOUNDARY = ANALYST_BOUNDARY
 
 
 @dataclass(slots=True)
@@ -120,11 +128,16 @@ def format_planner_result(result: PlannerResult) -> str:
     return "\n".join(lines)
 
 
-def format_sql_result(task: TaskItem, result: SQLResult) -> str:
+def format_sql_result(
+    task: TaskItem,
+    result: SQLResult,
+    *,
+    is_semantic_retry: bool = False,
+) -> str:
     """Render observable SQL Agent stages without generating an answer."""
 
     lines = [
-        "[SQL Agent]",
+        "[SQL Agent Retry]" if is_semantic_retry else "[SQL Agent]",
         f"Task: {task.task_id} - {task.description}",
         "",
         "[Context]",
@@ -149,12 +162,28 @@ def format_sql_result(task: TaskItem, result: SQLResult) -> str:
     return "\n".join(lines)
 
 
+def format_reviewer_result(result: ReviewerResult) -> str:
+    """Render one structured semantic decision without inventing analysis."""
+
+    lines = [
+        "[Reviewer]",
+        f"Decision: {result.decision}",
+        f"Reason: {result.reason_summary}",
+    ]
+    for issue in result.issues:
+        lines.append(f"Issue: {issue.issue_type} - {issue.description}")
+    if result.retry_instruction:
+        lines.append(f"Retry instruction: {result.retry_instruction}")
+    return "\n".join(lines)
+
+
 def run_cli(
     *,
     input_fn: Callable[[str], str] = input,
     output_fn: Callable[[str], None] = print,
     planner: Planner | None = None,
     sql_agent: SQLAgent | None = None,
+    reviewer: Reviewer | None = None,
     wren_tools: WrenTools | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> int:
@@ -162,6 +191,7 @@ def run_cli(
 
     active_planner = planner
     active_sql_agent = sql_agent
+    active_reviewer = reviewer
     active_wren_tools = wren_tools
 
     while True:
@@ -209,22 +239,39 @@ def run_cli(
                 model_client=active_planner.model_client,
                 wren_tools=active_wren_tools,
             )
+        if active_reviewer is None:
+            active_reviewer = Reviewer(
+                model_client=active_planner.model_client,
+            )
 
         task_by_id = {task.task_id: task for task in result.state["task_plan"]}
         try:
-            sql_results = execute_ready_query_tasks(
+            query_runs = execute_ready_query_tasks(
                 result.state,
                 active_sql_agent,
+                active_reviewer,
                 trace=result.trace,
             )
-        except SQLAgentError as exc:
-            output_fn(f"SQL Agent failed: {exc}")
+        except (SQLAgentError, ReviewerError) as exc:
+            output_fn(f"DataPilot workflow failed: {exc}")
             continue
-        for sql_result in sql_results:
-            output_fn(format_sql_result(task_by_id[sql_result.task_id], sql_result))
-        if any(not sql_result.success for sql_result in sql_results):
+        for query_run in query_runs:
+            task = task_by_id[query_run.task_id]
+            for index, sql_result in enumerate(query_run.sql_results):
+                output_fn(
+                    format_sql_result(
+                        task,
+                        sql_result,
+                        is_semantic_retry=index > 0,
+                    )
+                )
+                if index < len(query_run.review_results):
+                    output_fn(
+                        format_reviewer_result(query_run.review_results[index])
+                    )
+        if any(not query_run.approved for query_run in query_runs):
             continue
-        output_fn(REVIEW_BOUNDARY)
+        output_fn(ANALYST_BOUNDARY)
 
 
 def main() -> int:
