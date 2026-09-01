@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from datapilot.agent.sql_agent import SQLAgent
+from datapilot.agent.analyst import Analyst
 from datapilot.agent.planner import Planner
 from datapilot.agent.reviewer import Reviewer
+from datapilot.agent.sql_agent import SQLAgent
 from datapilot.cli import (
     PLANNER_CONFIGURATION_HELP,
     PLANNER_CONFIGURATION_REQUIRED,
@@ -41,6 +42,56 @@ class StaticPlannerModel:
                         "depends_on": [],
                         "status": "pending",
                     }
+                ],
+                "requires_database": True,
+                "requires_context": False,
+                "is_follow_up": False,
+            }
+        )
+
+
+class MultiStepPlannerModel:
+    def complete(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+    ) -> str:
+        del system_prompt, user_prompt, response_schema
+        return json.dumps(
+            {
+                "intent": "multi_step_analysis",
+                "reason_summary": "Two periods must be compared.",
+                "tasks": [
+                    {
+                        "task_id": "q2",
+                        "description": "Retrieve Q2 category GMV.",
+                        "task_type": "query",
+                        "depends_on": [],
+                        "status": "pending",
+                    },
+                    {
+                        "task_id": "q3",
+                        "description": "Retrieve Q3 category GMV.",
+                        "task_type": "query",
+                        "depends_on": [],
+                        "status": "pending",
+                    },
+                    {
+                        "task_id": "compare",
+                        "description": "Compare category GMV.",
+                        "task_type": "analysis",
+                        "depends_on": ["q2", "q3"],
+                        "status": "pending",
+                    },
+                    {
+                        "task_id": "response",
+                        "description": "Answer the user.",
+                        "task_type": "response",
+                        "depends_on": ["compare"],
+                        "status": "pending",
+                    },
                 ],
                 "requires_database": True,
                 "requires_context": False,
@@ -134,6 +185,21 @@ class FakeWrenTools:
         tags: list[str] | None = None,
     ) -> None:
         del nl, sql, tags
+
+
+class ComparisonWrenTools(FakeWrenTools):
+    def query(self, sql: str, *, limit: int = 100) -> WrenQueryResult:
+        del limit
+        rows = (
+            [{"category": "A", "gmv": 100}, {"category": "B", "gmv": 200}]
+            if "Q2" in sql
+            else [{"category": "A", "gmv": 80}, {"category": "B", "gmv": 240}]
+        )
+        return WrenQueryResult(
+            columns=["category", "gmv"],
+            rows=rows,
+            row_count=2,
+        )
 
 
 def test_cli_state_initialization() -> None:
@@ -294,6 +360,64 @@ def test_cli_displays_semantic_retry_without_final_answer() -> None:
     assert outputs[5] == REVIEW_BOUNDARY
     assert outputs[6] == "Goodbye."
     assert not any("final answer" in output.lower() for output in outputs)
+
+
+def test_cli_displays_analyst_and_grounded_final_answer() -> None:
+    inputs = iter(["比较 Q2 和 Q3 各商品类别 GMV", "exit"])
+    outputs: list[str] = []
+    sql_model = SequenceModel(
+        [
+            json.dumps(
+                {
+                    "sql": (
+                        "SELECT category, gmv FROM orders "
+                        "WHERE quarter = 'Q2'"
+                    ),
+                    "summary": "Retrieve Q2.",
+                }
+            ),
+            json.dumps(
+                {
+                    "sql": (
+                        "SELECT category, gmv FROM orders "
+                        "WHERE quarter = 'Q3'"
+                    ),
+                    "summary": "Retrieve Q3.",
+                }
+            ),
+        ]
+    )
+    answer_model = SequenceModel(
+        [
+            json.dumps(
+                {
+                    "answer": "A 类 GMV 下降 20（20%），为最大降幅。",
+                    "key_findings": ["A difference=-20", "A growth=-20%"],
+                    "source_task_ids": ["compare"],
+                }
+            )
+        ]
+    )
+
+    exit_code = run_cli(
+        input_fn=lambda _: next(inputs),
+        output_fn=outputs.append,
+        planner=Planner(model_client=MultiStepPlannerModel()),
+        sql_agent=SQLAgent(
+            model_client=sql_model,
+            wren_tools=ComparisonWrenTools(),
+        ),
+        reviewer=Reviewer(model_client=StaticReviewerModel()),
+        analyst=Analyst(model_client=answer_model),
+        environ={},
+    )
+
+    assert exit_code == 0
+    assert sum("[SQL Agent]" in output for output in outputs) == 2
+    assert sum("[Reviewer]" in output for output in outputs) == 2
+    assert any("[Analyst]" in output for output in outputs)
+    assert any("[Final Answer]" in output for output in outputs)
+    assert any("A 类 GMV 下降 20" in output for output in outputs)
 
 
 def test_cli_quit_exits_without_creating_state() -> None:

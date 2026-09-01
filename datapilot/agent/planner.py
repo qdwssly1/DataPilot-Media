@@ -69,6 +69,10 @@ Do not generate SQL, execute SQL, call tools, guess data, or answer the question
 Return one JSON object that exactly matches the provided schema.
 Keep reason_summary short and state only the observable decision reason.
 All tasks must start with status 'pending' and may depend only on earlier tasks.
+For a database question, end the plan with a response task grounded in completed
+query or analysis tasks. For a comparison, use separate query tasks when needed,
+then an analysis task for calculations, then a response task. Never put SQL in a
+task description.
 """
 
 PLANNER_RESPONSE_SCHEMA: dict[str, Any] = {

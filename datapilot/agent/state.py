@@ -101,6 +101,33 @@ class ReviewerResult:
     review_retry_count: int = 0
 
 
+@dataclass(slots=True)
+class AnalysisResult:
+    """Grounded result produced for one analysis task."""
+
+    task_id: str
+    summary: str
+    findings: list[str] = field(default_factory=list)
+    derived_values: dict[str, Any] = field(default_factory=dict)
+    source_task_ids: list[str] = field(default_factory=list)
+    success: bool = True
+    error: str | None = None
+    retry_count: int = 0
+
+
+@dataclass(slots=True)
+class FinalAnswerResult:
+    """Structured final response grounded in completed task outputs."""
+
+    task_id: str
+    answer: str
+    key_findings: list[str] = field(default_factory=list)
+    source_task_ids: list[str] = field(default_factory=list)
+    success: bool = True
+    error: str | None = None
+    retry_count: int = 0
+
+
 # Phase 4 exposed this name; keep it as a compatibility alias.
 ReviewResult = ReviewerResult
 
@@ -129,7 +156,9 @@ class AgentState(TypedDict):
     retry_count: int
     review_result: ReviewerResult | None
     review_results: list[ReviewerResult]
+    analysis_results: list[AnalysisResult]
     final_answer: str | None
+    final_answer_result: FinalAnswerResult | None
     session_context: SessionContext
     trace_id: str
 
@@ -163,7 +192,9 @@ def create_initial_state(
         retry_count=0,
         review_result=None,
         review_results=[],
+        analysis_results=[],
         final_answer=None,
+        final_answer_result=None,
         session_context=SessionContext(),
         trace_id=trace_id or str(uuid4()),
     )

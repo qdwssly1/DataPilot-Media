@@ -1,4 +1,4 @@
-"""Interactive CLI through DataPilot planning, SQL, and semantic review."""
+"""Interactive CLI for the complete Phase 6 DataPilot workflow."""
 
 from __future__ import annotations
 
@@ -7,12 +7,15 @@ from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from typing import Any
 
-from datapilot.agent.graph import execute_ready_query_tasks
+from datapilot.agent.analyst import Analyst, AnalystError
+from datapilot.agent.graph import execute_task_plan
 from datapilot.agent.planner import Planner, PlannerError, PlannerResult
 from datapilot.agent.reviewer import Reviewer, ReviewerError
 from datapilot.agent.sql_agent import SQLAgent, SQLAgentError, WrenTools
 from datapilot.agent.state import (
     AgentState,
+    AnalysisResult,
+    FinalAnswerResult,
     ReviewerResult,
     SQLResult,
     TaskItem,
@@ -27,8 +30,9 @@ EXIT_COMMANDS = frozenset({"exit", "quit"})
 PLANNER_CONFIGURATION_REQUIRED = "Planner requires LLM configuration."
 PLANNER_CONFIGURATION_HELP = "Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL."
 WREN_RUNTIME_NOT_CONFIGURED = "Wren runtime/data source is not configured."
-ANALYST_BOUNDARY = "Analyst is not implemented yet."
-REVIEW_BOUNDARY = ANALYST_BOUNDARY
+FINAL_ANSWER_UNAVAILABLE = "No grounded response was produced."
+ANALYST_BOUNDARY = FINAL_ANSWER_UNAVAILABLE
+REVIEW_BOUNDARY = FINAL_ANSWER_UNAVAILABLE
 
 
 @dataclass(slots=True)
@@ -177,6 +181,29 @@ def format_reviewer_result(result: ReviewerResult) -> str:
     return "\n".join(lines)
 
 
+def format_analysis_result(result: AnalysisResult) -> str:
+    """Render one grounded analysis result and its deterministic findings."""
+
+    lines = [
+        "[Analyst]",
+        f"Task: {result.task_id}",
+        f"Summary: {result.summary}",
+    ]
+    for finding in result.findings:
+        lines.append(f"Finding: {finding}")
+    if not result.success:
+        lines.append(f"Failed: {result.error}")
+    return "\n".join(lines)
+
+
+def format_final_answer(result: FinalAnswerResult) -> str:
+    """Render the model-authored answer only after grounding validation."""
+
+    if not result.success:
+        return f"[Final Answer]\nFailed: {result.error}"
+    return f"[Final Answer]\n{result.answer}"
+
+
 def run_cli(
     *,
     input_fn: Callable[[str], str] = input,
@@ -184,14 +211,16 @@ def run_cli(
     planner: Planner | None = None,
     sql_agent: SQLAgent | None = None,
     reviewer: Reviewer | None = None,
+    analyst: Analyst | None = None,
     wren_tools: WrenTools | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> int:
-    """Run implemented nodes until the review boundary or user exit."""
+    """Run Planner and dispatch the complete sequential Phase 6 workflow."""
 
     active_planner = planner
     active_sql_agent = sql_agent
     active_reviewer = reviewer
+    active_analyst = analyst
     active_wren_tools = wren_tools
 
     while True:
@@ -243,19 +272,24 @@ def run_cli(
             active_reviewer = Reviewer(
                 model_client=active_planner.model_client,
             )
+        if active_analyst is None:
+            active_analyst = Analyst(
+                model_client=active_planner.model_client,
+            )
 
         task_by_id = {task.task_id: task for task in result.state["task_plan"]}
         try:
-            query_runs = execute_ready_query_tasks(
+            workflow = execute_task_plan(
                 result.state,
                 active_sql_agent,
                 active_reviewer,
+                active_analyst,
                 trace=result.trace,
             )
-        except (SQLAgentError, ReviewerError) as exc:
+        except (SQLAgentError, ReviewerError, AnalystError) as exc:
             output_fn(f"DataPilot workflow failed: {exc}")
             continue
-        for query_run in query_runs:
+        for query_run in workflow.reviewed_queries:
             task = task_by_id[query_run.task_id]
             for index, sql_result in enumerate(query_run.sql_results):
                 output_fn(
@@ -269,9 +303,14 @@ def run_cli(
                     output_fn(
                         format_reviewer_result(query_run.review_results[index])
                     )
-        if any(not query_run.approved for query_run in query_runs):
+        if any(not query_run.approved for query_run in workflow.reviewed_queries):
             continue
-        output_fn(ANALYST_BOUNDARY)
+        for analysis_result in workflow.analysis_results:
+            output_fn(format_analysis_result(analysis_result))
+        if workflow.final_answer_result is None:
+            output_fn(FINAL_ANSWER_UNAVAILABLE)
+        else:
+            output_fn(format_final_answer(workflow.final_answer_result))
 
 
 def main() -> int:
