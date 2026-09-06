@@ -35,6 +35,7 @@ from datapilot.agent.state import (
 from datapilot.llm.openai_compatible import OpenAICompatiblePlannerModel
 from datapilot.memory.session_memory import SessionMemoryStore
 from datapilot.tools.wren_tools import WrenConfigurationError, WrenToolAdapter
+from datapilot.tracing.summary import format_trace_summary, summarize_trace
 from datapilot.tracing.trace import EventType, TraceCollector
 
 PROMPT = "DataPilot > "
@@ -261,6 +262,13 @@ def clear_session(
         )
 
 
+def _print_run_summary(
+    output_fn: Callable[[str], None],
+    trace: TraceCollector,
+) -> None:
+    output_fn(format_trace_summary(summarize_trace(trace.get_events())))
+
+
 def run_cli(
     *,
     input_fn: Callable[[str], str] = input,
@@ -351,6 +359,7 @@ def run_cli(
             )
         except (PlannerError, FollowUpResolutionError) as exc:
             output_fn(f"Planner failed: {exc}")
+            _print_run_summary(output_fn, initialized.trace)
             continue
         output_fn(format_planner_result(planning.initial_result))
         if initialized.state["was_follow_up"]:
@@ -358,6 +367,7 @@ def run_cli(
             if not planning.can_execute or planning.resolution is None:
                 reason = planning.error or "Follow-up requires clarification."
                 output_fn(f"[Session]\nCannot resolve follow-up: {reason}")
+                _print_run_summary(output_fn, initialized.trace)
                 continue
             output_fn(f"[Resolved Query]\n{initialized.state['resolved_query']}")
             if planning.effective_result is not None:
@@ -396,6 +406,7 @@ def run_cli(
             )
         except (SQLAgentError, ReviewerError, AnalystError) as exc:
             output_fn(f"DataPilot workflow failed: {exc}")
+            _print_run_summary(output_fn, initialized.trace)
             continue
         for query_run in workflow.reviewed_queries:
             task = task_by_id[query_run.task_id]
@@ -412,6 +423,7 @@ def run_cli(
                         format_reviewer_result(query_run.review_results[index])
                     )
         if any(not query_run.approved for query_run in workflow.reviewed_queries):
+            _print_run_summary(output_fn, initialized.trace)
             continue
         for analysis_result in workflow.analysis_results:
             output_fn(format_analysis_result(analysis_result))
@@ -432,6 +444,7 @@ def run_cli(
                 )
             except SessionContextError as exc:
                 output_fn(f"Session memory update failed: {exc}")
+        _print_run_summary(output_fn, initialized.trace)
 
 
 def main() -> int:

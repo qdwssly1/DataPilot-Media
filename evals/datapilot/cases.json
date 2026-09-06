@@ -1,0 +1,37 @@
+[
+  {"id":"planner_simple","component":"planner","scenario":"simple_question","query":"什么是 GMV？","expected":{"intent":"simple_question","task_count":1}},
+  {"id":"planner_single","component":"planner","scenario":"single_query","query":"2026 年 7 月 GMV 是多少？","expected":{"intent":"single_query","task_count":2}},
+  {"id":"planner_multi","component":"planner","scenario":"multi_step_analysis","query":"比较 Q2 和 Q3 各类别 GMV。","expected":{"intent":"multi_step_analysis","task_count":4}},
+  {"id":"planner_follow_up","component":"planner","scenario":"follow_up","query":"那华南地区呢？","expected":{"intent":"follow_up","task_count":1}},
+
+  {"id":"sql_single_metric","component":"sql","scenario":"single_metric","sql":["SELECT SUM(gmv) AS gmv FROM orders"],"expected":"success"},
+  {"id":"sql_grouped_metric","component":"sql","scenario":"grouped_metric","sql":["SELECT category, SUM(gmv) AS gmv FROM orders GROUP BY category"],"expected":"success"},
+  {"id":"sql_time_filter","component":"sql","scenario":"time_filter","sql":["SELECT SUM(gmv) AS gmv FROM orders WHERE quarter = 'Q2'"],"expected":"success"},
+  {"id":"sql_region_filter","component":"sql","scenario":"region_filter","sql":["SELECT SUM(gmv) AS gmv FROM orders WHERE region = '华南'"],"filters":{"region":["华南"]},"expected":"success"},
+  {"id":"sql_cte_select","component":"sql","scenario":"cte_select","sql":["WITH totals AS (SELECT SUM(gmv) AS gmv FROM orders) SELECT * FROM totals"],"expected":"success"},
+  {"id":"sql_write_rejection","component":"sql","scenario":"write_rejection","sql":["DELETE FROM orders"],"expected":"safety_rejection"},
+  {"id":"sql_authoritative_literal","component":"sql","scenario":"authoritative_literal","sql":["SELECT SUM(gmv) FROM orders WHERE region = 'South China'","SELECT SUM(gmv) FROM orders WHERE region = '华南'"],"filters":{"region":["华南"]},"expected":"success_after_retry"},
+
+  {"id":"review_correct","component":"reviewer","scenario":"correct","expected":{"decision":"approve","issue":null}},
+  {"id":"review_metric_mismatch","component":"reviewer","scenario":"metric_mismatch","expected":{"decision":"retry","issue":"metric_mismatch"}},
+  {"id":"review_dimension_mismatch","component":"reviewer","scenario":"dimension_mismatch","expected":{"decision":"retry","issue":"dimension_mismatch"}},
+  {"id":"review_time_mismatch","component":"reviewer","scenario":"time_range_mismatch","expected":{"decision":"retry","issue":"time_range_mismatch"}},
+  {"id":"review_aggregation_mismatch","component":"reviewer","scenario":"aggregation_mismatch","expected":{"decision":"retry","issue":"aggregation_mismatch"}},
+
+  {"id":"analysis_difference","component":"analyst","scenario":"difference","left":{"A":100},"right":{"A":80},"expected":{"A":{"difference":-20}}},
+  {"id":"analysis_growth_rate","component":"analyst","scenario":"growth_rate","left":{"A":80},"right":{"A":100},"expected":{"A":{"growth_rate":0.25}}},
+  {"id":"analysis_largest_decline","component":"analyst","scenario":"largest_decline","left":{"A":100,"B":200},"right":{"A":80,"B":210},"expected":{"largest_decline":"A"}},
+  {"id":"analysis_multi_query","component":"analyst","scenario":"multi_query","left":{"A":250,"B":300},"right":{"A":200,"B":370},"expected":{"A":{"difference":-50,"growth_rate":-0.2},"B":{"difference":70}}},
+  {"id":"analysis_ambiguous_fail_closed","component":"analyst","scenario":"ambiguous","expected":{"error":"ambiguous metric columns"}},
+
+  {"id":"follow_inherit_add_region","component":"follow_up","scenario":"inherit_add_region","query":"那华南地区呢？","expected":{"region":"华南"}},
+  {"id":"follow_override_time","component":"follow_up","scenario":"override_time","query":"只看 Q3。","expected":{"time":["Q3"]}},
+  {"id":"follow_override_metric","component":"follow_up","scenario":"override_metric","query":"改看订单量。","expected":{"metric":"订单量"}},
+  {"id":"follow_new_topic","component":"follow_up","scenario":"new_topic","query":"统计所有客户数量。","expected":{"inherit":false}},
+  {"id":"follow_ambiguous_no_context","component":"follow_up","scenario":"ambiguous_no_context","query":"那呢？","expected":{"can_resolve":false}},
+  {"id":"follow_failed_turn_poisoning","component":"follow_up","scenario":"failed_turn_poisoning","query":"改看不存在字段。","expected":{"memory_unchanged":true}},
+
+  {"id":"e2e_single_query","component":"end_to_end","scenario":"single_query","expected":{"success":true}},
+  {"id":"e2e_multi_analysis","component":"end_to_end","scenario":"multi_analysis","expected":{"success":true,"largest_decline":"A"}},
+  {"id":"e2e_semantic_correction","component":"end_to_end","scenario":"semantic_correction","expected":{"success":true,"semantic_retries":1}}
+]

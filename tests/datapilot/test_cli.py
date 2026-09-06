@@ -301,7 +301,10 @@ def test_cli_runs_sql_agent_without_fake_final_answer() -> None:
     assert "[Reviewer]" in outputs[2]
     assert "Decision: approve" in outputs[2]
     assert outputs[3] == REVIEW_BOUNDARY
-    assert outputs[4] == "Goodbye."
+    assert "[Run Summary]" in outputs[4]
+    assert "Tasks: 1/1 completed" in outputs[4]
+    assert "SQL Queries: 1" in outputs[4]
+    assert outputs[5] == "Goodbye."
     assert not any("final answer" in output.lower() for output in outputs)
 
 
@@ -358,7 +361,9 @@ def test_cli_displays_semantic_retry_without_final_answer() -> None:
     assert "[SQL Agent Retry]" in outputs[3]
     assert "Decision: approve" in outputs[4]
     assert outputs[5] == REVIEW_BOUNDARY
-    assert outputs[6] == "Goodbye."
+    assert "[Run Summary]" in outputs[6]
+    assert "Semantic Retries: 1" in outputs[6]
+    assert outputs[7] == "Goodbye."
     assert not any("final answer" in output.lower() for output in outputs)
 
 
