@@ -1,4 +1,4 @@
-"""Interactive CLI for the complete Phase 6 DataPilot workflow."""
+"""Interactive multi-turn CLI for the DataPilot workflow."""
 
 from __future__ import annotations
 
@@ -8,7 +8,17 @@ from enum import Enum
 from typing import Any
 
 from datapilot.agent.analyst import Analyst, AnalystError
-from datapilot.agent.graph import execute_task_plan
+from datapilot.agent.follow_up import (
+    FollowUpResolutionError,
+    FollowUpResolver,
+    SessionContextError,
+    SessionContextExtractor,
+)
+from datapilot.agent.graph import (
+    commit_session_context,
+    execute_task_plan,
+    prepare_session_turn,
+)
 from datapilot.agent.planner import Planner, PlannerError, PlannerResult
 from datapilot.agent.reviewer import Reviewer, ReviewerError
 from datapilot.agent.sql_agent import SQLAgent, SQLAgentError, WrenTools
@@ -18,19 +28,23 @@ from datapilot.agent.state import (
     FinalAnswerResult,
     ReviewerResult,
     SQLResult,
+    SessionContext,
     TaskItem,
     create_initial_state,
 )
 from datapilot.llm.openai_compatible import OpenAICompatiblePlannerModel
+from datapilot.memory.session_memory import SessionMemoryStore
 from datapilot.tools.wren_tools import WrenConfigurationError, WrenToolAdapter
 from datapilot.tracing.trace import EventType, TraceCollector
 
 PROMPT = "DataPilot > "
 EXIT_COMMANDS = frozenset({"exit", "quit"})
+RESET_COMMANDS = frozenset({"reset", "clear"})
 PLANNER_CONFIGURATION_REQUIRED = "Planner requires LLM configuration."
 PLANNER_CONFIGURATION_HELP = "Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL."
 WREN_RUNTIME_NOT_CONFIGURED = "Wren runtime/data source is not configured."
 FINAL_ANSWER_UNAVAILABLE = "No grounded response was produced."
+SESSION_CLEARED = "Session context cleared."
 ANALYST_BOUNDARY = FINAL_ANSWER_UNAVAILABLE
 REVIEW_BOUNDARY = FINAL_ANSWER_UNAVAILABLE
 
@@ -52,7 +66,12 @@ class PlannerExecutionResult:
     planner_result: PlannerResult
 
 
-def process_input(user_query: str) -> InitializationResult:
+def process_input(
+    user_query: str,
+    *,
+    session_id: str | None = None,
+    previous_session: SessionContext | None = None,
+) -> InitializationResult:
     """Initialize state and observable trace events without running an agent."""
 
     query = user_query.strip()
@@ -67,7 +86,12 @@ def process_input(user_query: str) -> InitializationResult:
         summary="Accepted a user query from the CLI.",
         metadata={"query": query},
     )
-    state = create_initial_state(query, trace_id=trace.trace_id)
+    state = create_initial_state(
+        query,
+        trace_id=trace.trace_id,
+        session_id=session_id,
+        previous_session=previous_session,
+    )
     trace.add_event(
         EventType.STATE_CREATED,
         component="agent.state",
@@ -75,6 +99,19 @@ def process_input(user_query: str) -> InitializationResult:
         summary="Created the initial DataPilot agent state.",
         metadata={"retry_count": state["retry_count"]},
     )
+    if session_id is not None and (
+        previous_session is None or previous_session.turn_index == 0
+    ):
+        trace.add_event(
+            EventType.SESSION_CREATED,
+            component="cli",
+            action="create_session",
+            summary="Created a DataPilot CLI session.",
+            metadata={
+                "session_id": state["session_context"].session_id[:8],
+                "turn_index": state["session_context"].turn_index,
+            },
+        )
     return InitializationResult(state=state, trace=trace)
 
 
@@ -204,6 +241,26 @@ def format_final_answer(result: FinalAnswerResult) -> str:
     return f"[Final Answer]\n{result.answer}"
 
 
+def clear_session(
+    session_store: SessionMemoryStore,
+    session_id: str,
+    *,
+    trace: TraceCollector | None = None,
+) -> None:
+    """Clear one CLI session and optionally emit a safe trace event."""
+
+    session_store.clear(session_id)
+    session_store.create(session_id)
+    if trace is not None:
+        trace.add_event(
+            EventType.SESSION_CONTEXT_CLEARED,
+            component="cli",
+            action="clear_session",
+            summary="Cleared DataPilot session context.",
+            metadata={"session_id": session_id[:8]},
+        )
+
+
 def run_cli(
     *,
     input_fn: Callable[[str], str] = input,
@@ -212,16 +269,27 @@ def run_cli(
     sql_agent: SQLAgent | None = None,
     reviewer: Reviewer | None = None,
     analyst: Analyst | None = None,
+    follow_up_resolver: FollowUpResolver | None = None,
+    context_extractor: SessionContextExtractor | None = None,
+    session_store: SessionMemoryStore | None = None,
+    session_id: str | None = None,
     wren_tools: WrenTools | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> int:
-    """Run Planner and dispatch the complete sequential Phase 6 workflow."""
+    """Run a reusable in-memory session until user exit."""
 
     active_planner = planner
     active_sql_agent = sql_agent
     active_reviewer = reviewer
     active_analyst = analyst
+    active_resolver = follow_up_resolver
+    active_extractor = context_extractor
     active_wren_tools = wren_tools
+    active_store = (
+        session_store if session_store is not None else SessionMemoryStore()
+    )
+    active_session = active_store.create(session_id)
+    active_session_id = active_session.session_id
 
     while True:
         try:
@@ -238,6 +306,15 @@ def run_cli(
         if query.lower() in EXIT_COMMANDS:
             output_fn("Goodbye.")
             return 0
+        if query.lower() in RESET_COMMANDS:
+            reset_trace = TraceCollector()
+            clear_session(
+                active_store,
+                active_session_id,
+                trace=reset_trace,
+            )
+            output_fn(SESSION_CLEARED)
+            continue
         if not query:
             continue
 
@@ -249,13 +326,42 @@ def run_cli(
                 output_fn(PLANNER_CONFIGURATION_HELP)
                 continue
             active_planner = Planner(model_client=model_client)
+        if active_resolver is None:
+            active_resolver = FollowUpResolver(
+                model_client=active_planner.model_client,
+            )
+        if active_extractor is None:
+            active_extractor = SessionContextExtractor(
+                model_client=active_planner.model_client,
+            )
 
+        previous_session = active_store.get(active_session_id)
+        initialized = process_input(
+            query,
+            session_id=active_session_id,
+            previous_session=previous_session,
+        )
         try:
-            result = process_planner_input(query, active_planner)
-        except PlannerError as exc:
+            planning = prepare_session_turn(
+                initialized.state,
+                active_planner,
+                active_resolver,
+                active_store,
+                trace=initialized.trace,
+            )
+        except (PlannerError, FollowUpResolutionError) as exc:
             output_fn(f"Planner failed: {exc}")
             continue
-        output_fn(format_planner_result(result.planner_result))
+        output_fn(format_planner_result(planning.initial_result))
+        if initialized.state["was_follow_up"]:
+            output_fn("[Session]\nFollow-up detected")
+            if not planning.can_execute or planning.resolution is None:
+                reason = planning.error or "Follow-up requires clarification."
+                output_fn(f"[Session]\nCannot resolve follow-up: {reason}")
+                continue
+            output_fn(f"[Resolved Query]\n{initialized.state['resolved_query']}")
+            if planning.effective_result is not None:
+                output_fn(format_planner_result(planning.effective_result))
 
         if active_sql_agent is None:
             if active_wren_tools is None:
@@ -277,14 +383,16 @@ def run_cli(
                 model_client=active_planner.model_client,
             )
 
-        task_by_id = {task.task_id: task for task in result.state["task_plan"]}
+        task_by_id = {
+            task.task_id: task for task in initialized.state["task_plan"]
+        }
         try:
             workflow = execute_task_plan(
-                result.state,
+                initialized.state,
                 active_sql_agent,
                 active_reviewer,
                 active_analyst,
-                trace=result.trace,
+                trace=initialized.trace,
             )
         except (SQLAgentError, ReviewerError, AnalystError) as exc:
             output_fn(f"DataPilot workflow failed: {exc}")
@@ -311,6 +419,19 @@ def run_cli(
             output_fn(FINAL_ANSWER_UNAVAILABLE)
         else:
             output_fn(format_final_answer(workflow.final_answer_result))
+        if planning.effective_result is not None:
+            try:
+                commit_session_context(
+                    initialized.state,
+                    planning.effective_result,
+                    workflow,
+                    active_store,
+                    active_extractor,
+                    trace=initialized.trace,
+                    resolution=planning.resolution,
+                )
+            except SessionContextError as exc:
+                output_fn(f"Session memory update failed: {exc}")
 
 
 def main() -> int:

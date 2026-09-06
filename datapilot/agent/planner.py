@@ -13,7 +13,7 @@ from enum import StrEnum
 from time import perf_counter
 from typing import Any, Protocol
 
-from datapilot.agent.state import AgentState, TaskItem
+from datapilot.agent.state import AgentState, TaskItem, get_effective_query
 from datapilot.tracing.trace import EventType, TraceCollector
 
 
@@ -307,7 +307,7 @@ class Planner:
             try:
                 response_text = self.model_client.complete(
                     system_prompt=SYSTEM_PROMPT,
-                    user_prompt=f"User query:\n{state['original_query']}",
+                    user_prompt=f"User query:\n{get_effective_query(state)}",
                     response_schema=PLANNER_RESPONSE_SCHEMA,
                 )
             except Exception as exc:

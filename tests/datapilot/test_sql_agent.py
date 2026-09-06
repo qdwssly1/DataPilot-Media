@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from datapilot.agent.follow_up import FollowUpResolution, FollowUpResolver
 from datapilot.agent.graph import execute_ready_query_tasks
 from datapilot.agent.reviewer import Reviewer
 from datapilot.agent.sql_agent import (
@@ -13,7 +14,15 @@ from datapilot.agent.sql_agent import (
     SQLAgentError,
     validate_read_only_sql,
 )
-from datapilot.agent.state import SQLResult, TaskItem, create_initial_state
+from datapilot.agent.state import (
+    ReviewerIssue,
+    ReviewerResult,
+    SQLResult,
+    SessionContext,
+    TaskItem,
+    TimeRangeContext,
+    create_initial_state,
+)
 from datapilot.tools.wren_tools import WrenQueryResult
 from datapilot.tracing.trace import EventType, TraceCollector
 
@@ -156,6 +165,23 @@ def _query_task(
     )
 
 
+def _state_with_region_filter(
+    task: TaskItem,
+) -> tuple[Any, TraceCollector]:
+    state, trace = _state_for(task)
+    resolved_query = "比较华南地区 Q2 和 Q3 各商品类别 GMV。"
+    state["was_follow_up"] = True
+    state["resolved_query"] = resolved_query
+    state["follow_up_resolution"] = FollowUpResolution(
+        filters={"region": ["华南"]},
+        resolved_query=resolved_query,
+        overridden_fields=["filters"],
+        can_resolve=True,
+        reason_summary="Added the explicit region filter.",
+    )
+    return state, trace
+
+
 def test_sql_agent_fetches_context() -> None:
     task = _query_task()
     state, trace = _state_for(task)
@@ -210,6 +236,152 @@ def test_sql_agent_generates_sql() -> None:
     assert result.sql == "SELECT SUM(gmv) AS gmv FROM orders"
     assert model.calls[0]["response_schema"]["additionalProperties"] is False
     assert "Do not answer the user" in model.calls[0]["system_prompt"]
+
+
+def test_sql_agent_includes_authoritative_semantic_filters() -> None:
+    task = _query_task()
+    state, trace = _state_with_region_filter(task)
+    model = FakeSQLModel(
+        [_response("SELECT SUM(gmv) FROM orders WHERE region = '华南'")]
+    )
+
+    result = SQLAgent(
+        model_client=model,
+        wren_tools=FakeWrenTools(),
+    ).execute_task(state, task, trace=trace)
+
+    assert result.success is True
+    prompt = model.calls[0]["user_prompt"]
+    assert "Authoritative semantic filters" in prompt
+    assert '"region":["华南"]' in prompt
+
+
+def test_sql_agent_rejects_translated_filter_before_dry_plan() -> None:
+    task = _query_task()
+    state, trace = _state_with_region_filter(task)
+    tools = FakeWrenTools()
+
+    result = SQLAgent(
+        model_client=FakeSQLModel(
+            [_response("SELECT SUM(gmv) FROM orders WHERE region = 'South China'")]
+        ),
+        wren_tools=tools,
+        max_attempts=1,
+    ).execute_task(state, task, trace=trace)
+
+    assert result.success is False
+    assert "region" in (result.error or "")
+    assert "华南" in (result.error or "")
+    assert not any(name in {"dry_plan", "query"} for name, _ in tools.calls)
+
+
+def test_sql_agent_accepts_corrected_authoritative_filter_literal() -> None:
+    task = _query_task()
+    state, trace = _state_with_region_filter(task)
+    tools = FakeWrenTools()
+    model = FakeSQLModel(
+        [
+            _response("SELECT SUM(gmv) FROM orders WHERE region = 'South China'"),
+            _response("SELECT SUM(gmv) FROM orders WHERE region = '华南'"),
+        ]
+    )
+
+    result = SQLAgent(model_client=model, wren_tools=tools).execute_task(
+        state,
+        task,
+        trace=trace,
+    )
+
+    assert result.success is True
+    assert result.sql.endswith("region = '华南'")
+    assert result.retry_count == 1
+    assert [name for name, _ in tools.calls].count("dry_plan") == 1
+    assert [name for name, _ in tools.calls].count("query") == 1
+    assert "authoritative semantic filter" in model.calls[1]["user_prompt"]
+
+
+def test_sql_agent_allows_explicit_wren_canonical_filter_mapping() -> None:
+    task = _query_task()
+    state, trace = _state_with_region_filter(task)
+    tools = FakeWrenTools(
+        context={
+            "canonical_mappings": {
+                "region": {"华南": "South China"},
+            }
+        }
+    )
+
+    result = SQLAgent(
+        model_client=FakeSQLModel(
+            [_response("SELECT SUM(gmv) FROM orders WHERE region = 'South China'")]
+        ),
+        wren_tools=tools,
+        max_attempts=1,
+    ).execute_task(state, task, trace=trace)
+
+    assert result.success is True
+
+
+def test_follow_up_normalized_filter_reaches_sql_agent() -> None:
+    previous = SessionContext(
+        session_id="session-a",
+        turn_index=1,
+        metrics=["GMV"],
+        dimensions=["product_category"],
+        time_range=TimeRangeContext(labels=["Q2", "Q3"]),
+        analysis_goal="Compare category GMV.",
+    )
+    resolution_response = json.dumps(
+        {
+            "resolved_query": "比较华南地区 Q2 和 Q3 各商品类别 GMV。",
+            "inherited_fields": [
+                "metrics",
+                "dimensions",
+                "time_range",
+                "analysis_goal",
+            ],
+            "overridden_fields": ["filters"],
+            "missing_fields": [],
+            "can_resolve": True,
+            "reason_summary": "Added the region filter.",
+            "metrics": ["GMV"],
+            "dimensions": ["product_category"],
+            "time_range": {
+                "labels": ["Q2", "Q3"],
+                "start": None,
+                "end": None,
+            },
+            "filters": {"region": ["华南地区"]},
+            "entities": {},
+            "analysis_goal": "Compare category GMV.",
+        },
+        ensure_ascii=False,
+    )
+    resolution = FollowUpResolver(FakeSQLModel([resolution_response])).resolve(
+        "那华南地区呢？",
+        previous,
+        trace=TraceCollector(),
+    )
+    task = _query_task()
+    state, trace = _state_for(task)
+    state["was_follow_up"] = True
+    state["resolved_query"] = resolution.resolved_query
+    state["follow_up_resolution"] = resolution
+    model = FakeSQLModel(
+        [_response("SELECT SUM(gmv) FROM orders WHERE region = '华南'")]
+    )
+
+    result = SQLAgent(
+        model_client=model,
+        wren_tools=FakeWrenTools(),
+        max_attempts=1,
+    ).execute_task(state, task, trace=trace)
+
+    assert result.success is True
+    assert resolution.filters == {"region": ["华南"]}
+    assert "华南地区" not in result.sql
+    assert "South China" not in result.sql
+    assert result.sql.endswith("region = '华南'")
 
 
 def test_sql_agent_rejects_write_sql() -> None:
@@ -470,6 +642,56 @@ def test_sql_agent_handles_multiple_query_tasks() -> None:
     assert state["pending_tasks"] == [analysis]
     assert state["current_task"] is analysis
     assert analysis.status == "pending"
+
+
+def test_sql_semantic_retry_keeps_original_task_contract() -> None:
+    q2 = TaskItem("q2", "Retrieve Q2 category GMV.", "query", status="completed")
+    q3 = TaskItem("q3", "Retrieve Q3 category GMV.", "query")
+    state, trace = _state_for(q2, q3)
+    state["completed_tasks"] = [q2]
+    state["pending_tasks"] = [q3]
+    state["current_task"] = q3
+    previous = SQLResult(
+        task_id="q3",
+        sql="SELECT category, SUM(gmv) FROM orders WHERE quarter = 'Q3'",
+        columns=["category", "gmv"],
+        rows=[{"category": "A", "gmv": 200}],
+        row_count=1,
+    )
+    feedback = ReviewerResult(
+        task_id="q3",
+        decision="retry",
+        reason_summary="Keep the Q3 aggregation scoped to the current task.",
+        issues=[ReviewerIssue("aggregation_mismatch", "Fix Q3 aggregation.")],
+        retry_instruction="Return Q3 category GMV only.",
+        confidence=0.9,
+    )
+    model = FakeSQLModel(
+        [
+            _response(
+                "SELECT category, SUM(gmv) AS gmv FROM orders "
+                "WHERE quarter = 'Q3' GROUP BY category"
+            )
+        ]
+    )
+
+    result = SQLAgent(
+        model_client=model,
+        wren_tools=FakeWrenTools(),
+    ).execute_correction(
+        state,
+        q3,
+        previous,
+        feedback,
+        trace=trace,
+    )
+
+    assert result.success is True
+    prompt = model.calls[0]["user_prompt"]
+    assert "original current TaskItem is authoritative" in prompt
+    assert "must still satisfy ONLY the original current TaskItem" in prompt
+    assert "Retrieve Q3 category GMV." in prompt
+    assert "Return Q3 category GMV only." in prompt
 
 
 def test_sql_agent_does_not_execute_analysis_task() -> None:

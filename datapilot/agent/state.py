@@ -7,6 +7,7 @@ having to hide workflow state inside chat messages.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
@@ -133,11 +134,53 @@ ReviewResult = ReviewerResult
 
 
 @dataclass(slots=True)
+class TimeRangeContext:
+    """Small structured representation of the active business time range."""
+
+    labels: list[str] = field(default_factory=list)
+    start: str | None = None
+    end: str | None = None
+
+
+@dataclass(slots=True)
 class SessionContext:
-    """Session identity only; conversational session memory is not implemented."""
+    """Compact authoritative business context for one successful session."""
 
     session_id: str = field(default_factory=lambda: str(uuid4()))
-    turn_number: int = 1
+    turn_index: int = 0
+    metrics: list[str] = field(default_factory=list)
+    dimensions: list[str] = field(default_factory=list)
+    time_range: TimeRangeContext = field(default_factory=TimeRangeContext)
+    filters: dict[str, list[str]] = field(default_factory=dict)
+    entities: dict[str, list[str]] = field(default_factory=dict)
+    analysis_goal: str | None = None
+    last_user_query: str | None = None
+    last_resolved_query: str | None = None
+    last_intent: str | None = None
+    last_answer_summary: str | None = None
+    last_source_task_ids: list[str] = field(default_factory=list)
+    updated_at: str | None = None
+
+    @property
+    def turn_number(self) -> int:
+        """Compatibility name retained for the Phase 2 public state shape."""
+
+        return self.turn_index
+
+    @property
+    def has_business_context(self) -> bool:
+        """Return whether the session has verified semantic slots to inherit."""
+
+        return bool(
+            self.metrics
+            or self.dimensions
+            or self.time_range.labels
+            or self.time_range.start
+            or self.time_range.end
+            or self.filters
+            or self.entities
+            or self.analysis_goal
+        )
 
 
 class AgentState(TypedDict):
@@ -145,6 +188,9 @@ class AgentState(TypedDict):
 
     messages: list[Message]
     original_query: str
+    resolved_query: str | None
+    was_follow_up: bool
+    follow_up_resolution: Any | None
     current_task: TaskItem | None
     task_plan: list[TaskItem]
     completed_tasks: list[TaskItem]
@@ -167,6 +213,8 @@ def create_initial_state(
     user_query: str,
     *,
     trace_id: str | None = None,
+    session_id: str | None = None,
+    previous_session: SessionContext | None = None,
 ) -> AgentState:
     """Create isolated state for one user query.
 
@@ -177,10 +225,23 @@ def create_initial_state(
     query = user_query.strip()
     if not query:
         raise ValueError("user_query must not be empty")
+    if previous_session is not None:
+        if session_id is not None and session_id != previous_session.session_id:
+            raise ValueError("session_id must match previous_session")
+        session_context = deepcopy(previous_session)
+        session_context.turn_index += 1
+    else:
+        session_context = SessionContext(
+            session_id=session_id or str(uuid4()),
+            turn_index=1,
+        )
 
     return AgentState(
         messages=[Message(role="user", content=query)],
         original_query=query,
+        resolved_query=None,
+        was_follow_up=False,
+        follow_up_resolution=None,
         current_task=None,
         task_plan=[],
         completed_tasks=[],
@@ -195,6 +256,12 @@ def create_initial_state(
         analysis_results=[],
         final_answer=None,
         final_answer_result=None,
-        session_context=SessionContext(),
+        session_context=session_context,
         trace_id=trace_id or str(uuid4()),
     )
+
+
+def get_effective_query(state: AgentState) -> str:
+    """Return the standalone resolved query, or the user's original input."""
+
+    return state["resolved_query"] or state["original_query"]

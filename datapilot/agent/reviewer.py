@@ -21,6 +21,7 @@ from datapilot.agent.state import (
     ReviewerResult,
     SQLResult,
     TaskItem,
+    get_effective_query,
 )
 from datapilot.tracing.trace import EventType, TraceCollector
 
@@ -60,6 +61,10 @@ REVIEWER_SYSTEM_PROMPT = """You are DataPilot's Semantic Reviewer.
 Decide whether the SQL and its execution result are sufficient for the current task.
 Check metric, dimensions, time range, filters, aggregation, joins, result relevance,
 and task completeness. You are not the SQL Agent or final analyst.
+Review ONLY the current task contract. Planner task decomposition is authoritative.
+Do not ask the SQL Agent to duplicate or absorb sibling tasks. If another Planner
+task owns another period, dimension, or analysis step, do not broaden the current
+SQL query to include it. Every retry_instruction must preserve current task scope.
 Do not execute SQL, answer the user, invent data, or reveal hidden reasoning.
 Return exactly one JSON object matching the supplied schema.
 Use approve only when the result supports the task. Use retry only when one corrected
@@ -430,9 +435,28 @@ class Reviewer:
             result.context_summary,
         )
         previous = asdict(previous_feedback) if previous_feedback else None
+        current_contract = {
+            "task_id": task.task_id,
+            "description": task.description,
+            "task_type": task.task_type,
+            "depends_on": task.depends_on,
+        }
+        task_boundaries = [
+            {
+                "task_id": planned.task_id,
+                "description": planned.description,
+                "task_type": planned.task_type,
+            }
+            for planned in state["task_plan"]
+        ]
         return (
-            f"Original user query:\n{state['original_query']}\n\n"
-            f"Current task:\n{task.description}\n\n"
+            f"Effective user query:\n{get_effective_query(state)}\n\n"
+            "Current task contract (authoritative):\n"
+            f"{_compact_json(current_contract, max_chars=2000)}\n\n"
+            "Task plan boundaries:\n"
+            f"{_compact_json(task_boundaries, max_chars=4000)}\n"
+            "Sibling tasks define scope boundaries only; never merge them into "
+            "the current task.\n\n"
             f"SQL:\n{result.sql}\n\n"
             "Execution metadata:\n"
             f"columns={_compact_json(result.columns, max_chars=1000)}\n"

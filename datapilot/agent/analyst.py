@@ -22,6 +22,7 @@ from datapilot.agent.state import (
     FinalAnswerResult,
     SQLResult,
     TaskItem,
+    get_effective_query,
 )
 from datapilot.tracing.trace import EventType, TraceCollector
 
@@ -198,8 +199,10 @@ def infer_grouped_comparison_columns(
 
 def _infer_grouped_comparison_spec(
     results: Sequence[SQLResult],
+    *,
+    analysis_task_id: str,
 ) -> tuple[str, str, str] | None:
-    """Infer a shared dimension and one numeric metric per result."""
+    """Infer a shared dimension and exactly one numeric metric per result."""
 
     if len(results) != 2 or any(not result.rows for result in results):
         return None
@@ -225,10 +228,18 @@ def _infer_grouped_comparison_spec(
             if column != dimension
             and all(_is_number(row.get(column)) for row in result.rows)
         ]
-        metric = _prefer_column(numeric_candidates, _METRIC_HINTS)
-        if metric is None:
+        if not numeric_candidates:
             return None
-        metrics.append(metric)
+        if len(numeric_candidates) > 1:
+            raise AnalystError(
+                stage="source_contract",
+                task_id=analysis_task_id,
+                summary=(
+                    "ambiguous metric columns / source result contract mismatch "
+                    f"for source {result.task_id}: {numeric_candidates}"
+                ),
+            )
+        metrics.append(numeric_candidates[0])
     return dimension, metrics[0], metrics[1]
 
 
@@ -668,7 +679,7 @@ class Analyst:
             query_results, analysis_results = _prepare_inputs(state, task)
             allowed = set(task.depends_on)
             prompt = (
-                f"Original user query:\n{state['original_query']}\n\n"
+                f"Effective user query:\n{get_effective_query(state)}\n\n"
                 f"Response task:\n{task.description}\n\n"
                 f"Allowed source_task_ids:\n{_compact_json(task.depends_on)}\n\n"
                 "Verified query results:\n"
@@ -727,7 +738,10 @@ class Analyst:
         analysis_results: list[AnalysisResult],
     ) -> AnalysisResult | None:
         if len(query_results) == 2 and not analysis_results:
-            inferred = _infer_grouped_comparison_spec(query_results)
+            inferred = _infer_grouped_comparison_spec(
+                query_results,
+                analysis_task_id=task.task_id,
+            )
             if inferred is not None:
                 dimension, left_metric, right_metric = inferred
                 values = compare_grouped_metrics(
@@ -782,7 +796,7 @@ class Analyst:
         started_at: float,
     ) -> AnalysisResult:
         prompt = (
-            f"Original user query:\n{state['original_query']}\n\n"
+            f"Effective user query:\n{get_effective_query(state)}\n\n"
             f"Analysis task:\n{task.description}\n\n"
             f"Allowed source_task_ids:\n{_compact_json(task.depends_on)}\n\n"
             "Verified query results:\n"

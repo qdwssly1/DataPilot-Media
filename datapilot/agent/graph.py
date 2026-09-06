@@ -7,12 +7,20 @@ final answer.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
 
 from datapilot.agent.analyst import Analyst
-from datapilot.agent.planner import Planner, PlannerResult
+from datapilot.agent.follow_up import (
+    FollowUpResolution,
+    FollowUpResolver,
+    SessionContextExtractor,
+    merge_session_context,
+)
+from datapilot.agent.planner import Planner, PlannerIntent, PlannerResult
 from datapilot.agent.reviewer import Reviewer, ReviewerRetryLimitError
 from datapilot.agent.sql_agent import SQLAgent, is_task_ready
 from datapilot.agent.state import (
@@ -21,13 +29,19 @@ from datapilot.agent.state import (
     FinalAnswerResult,
     ReviewerResult,
     SQLResult,
+    SessionContext,
     TaskItem,
+    get_effective_query,
 )
+from datapilot.memory.session_memory import SessionMemoryStore
 from datapilot.tracing.trace import EventType, TraceCollector
 
 GRAPH_NODES = (
     "start",
     "planner",
+    "session_context",
+    "follow_up_resolver",
+    "replan",
     "dispatcher",
     "sql_agent",
     "reviewer",
@@ -61,6 +75,277 @@ class WorkflowRun:
     reviewed_queries: tuple[ReviewedQueryRun, ...]
     analysis_results: tuple[AnalysisResult, ...]
     final_answer_result: FinalAnswerResult | None
+
+
+@dataclass(frozen=True, slots=True)
+class TurnPlanningRun:
+    """Initial planning plus optional one-shot follow-up resolution."""
+
+    initial_result: PlannerResult
+    effective_result: PlannerResult | None
+    resolution: FollowUpResolution | None = None
+    error: str | None = None
+
+    @property
+    def can_execute(self) -> bool:
+        return self.effective_result is not None and self.error is None
+
+
+@dataclass(frozen=True, slots=True)
+class SessionTurnRun:
+    """Observable outcome of one complete session-aware turn."""
+
+    planning: TurnPlanningRun
+    workflow: WorkflowRun | None
+    memory_updated: bool = False
+
+    @property
+    def success(self) -> bool:
+        return bool(
+            self.workflow
+            and self.workflow.final_answer_result
+            and self.workflow.final_answer_result.success
+            and self.memory_updated
+        )
+
+
+def _session_metadata(state: AgentState) -> dict[str, Any]:
+    context = state["session_context"]
+    return {
+        "session_id": context.session_id[:8],
+        "turn_index": context.turn_index,
+    }
+
+
+def prepare_session_turn(
+    state: AgentState,
+    planner: Planner,
+    resolver: FollowUpResolver,
+    session_store: SessionMemoryStore,
+    *,
+    trace: TraceCollector,
+) -> TurnPlanningRun:
+    """Plan raw input and resolve/re-plan at most one confirmed follow-up."""
+
+    initial_result = planner.plan(state, trace=trace)
+    if initial_result.intent is not PlannerIntent.FOLLOW_UP:
+        return TurnPlanningRun(
+            initial_result=initial_result,
+            effective_result=initial_result,
+        )
+
+    state["was_follow_up"] = True
+    trace.add_event(
+        EventType.FOLLOW_UP_DETECTED,
+        component="session_workflow",
+        action="detect_follow_up",
+        summary="Planner identified a follow-up request.",
+        metadata=_session_metadata(state),
+    )
+    previous = session_store.get(state["session_context"].session_id)
+    has_context = bool(previous and previous.has_business_context)
+    trace.add_event(
+        EventType.SESSION_CONTEXT_LOADED,
+        component="session_workflow",
+        action="load_context",
+        summary="Session context lookup completed.",
+        metadata={**_session_metadata(state), "has_business_context": has_context},
+    )
+    if previous is None or not previous.has_business_context:
+        resolution = FollowUpResolution(
+            can_resolve=False,
+            missing_fields=["session_context"],
+            reason_summary="Missing previous successful analysis context.",
+        )
+        state["follow_up_resolution"] = resolution
+        trace.add_event(
+            EventType.FOLLOW_UP_RESOLUTION_FAILED,
+            component="session_workflow",
+            action="load_context",
+            summary="Follow-up cannot be resolved without prior context.",
+            metadata=_session_metadata(state),
+        )
+        return TurnPlanningRun(
+            initial_result=initial_result,
+            effective_result=None,
+            resolution=resolution,
+            error=resolution.reason_summary,
+        )
+
+    resolution = resolver.resolve(
+        state["original_query"],
+        previous,
+        trace=trace,
+    )
+    state["follow_up_resolution"] = resolution
+    if not resolution.can_resolve or resolution.resolved_query is None:
+        return TurnPlanningRun(
+            initial_result=initial_result,
+            effective_result=None,
+            resolution=resolution,
+            error=resolution.reason_summary,
+        )
+
+    state["resolved_query"] = resolution.resolved_query
+    effective_result = planner.plan(state, trace=trace)
+    if effective_result.intent is PlannerIntent.FOLLOW_UP:
+        failed_resolution = deepcopy(resolution)
+        failed_resolution.can_resolve = False
+        failed_resolution.missing_fields = ["standalone_query"]
+        failed_resolution.reason_summary = (
+            "Resolved query was still classified as a follow-up."
+        )
+        state["follow_up_resolution"] = failed_resolution
+        state["resolved_query"] = None
+        trace.add_event(
+            EventType.FOLLOW_UP_RESOLUTION_FAILED,
+            component="session_workflow",
+            action="replan",
+            summary="Follow-up re-plan did not produce a standalone request.",
+            metadata=_session_metadata(state),
+        )
+        return TurnPlanningRun(
+            initial_result=initial_result,
+            effective_result=None,
+            resolution=failed_resolution,
+            error=failed_resolution.reason_summary,
+        )
+    return TurnPlanningRun(
+        initial_result=initial_result,
+        effective_result=effective_result,
+        resolution=resolution,
+    )
+
+
+def _workflow_succeeded(state: AgentState, workflow: WorkflowRun) -> bool:
+    return bool(
+        workflow.final_answer_result
+        and workflow.final_answer_result.success
+        and state["final_answer"]
+        and all(result.success for result in state["analysis_results"])
+        and all(result.success for result in workflow.analysis_results)
+        and not state["pending_tasks"]
+        and all(task.status == "completed" for task in state["task_plan"])
+    )
+
+
+def commit_session_context(
+    state: AgentState,
+    planner_result: PlannerResult,
+    workflow: WorkflowRun,
+    session_store: SessionMemoryStore,
+    extractor: SessionContextExtractor,
+    *,
+    trace: TraceCollector,
+    resolution: FollowUpResolution | None = None,
+) -> bool:
+    """Commit compact semantic context only after full workflow success."""
+
+    if not _workflow_succeeded(state, workflow):
+        return False
+    session_id = state["session_context"].session_id
+    if state["was_follow_up"]:
+        previous = session_store.get(session_id)
+        if previous is None or resolution is None:
+            return False
+        context = merge_session_context(previous, resolution)
+    else:
+        update = extractor.extract(get_effective_query(state), state["task_plan"])
+        context = SessionContext(session_id=session_id)
+        context.metrics = list(update.metrics)
+        context.dimensions = list(update.dimensions)
+        context.time_range = deepcopy(update.time_range)
+        context.filters = deepcopy(update.filters)
+        context.entities = deepcopy(update.entities)
+        context.analysis_goal = update.analysis_goal
+
+    context.turn_index = state["session_context"].turn_index
+    context.last_user_query = state["original_query"]
+    context.last_resolved_query = get_effective_query(state)
+    context.last_intent = planner_result.intent.value
+    context.last_answer_summary = " ".join(state["final_answer"].split())[:300]
+    context.last_source_task_ids = list(
+        workflow.final_answer_result.source_task_ids
+    )
+    context.updated_at = datetime.now(UTC).isoformat()
+    session_store.save(context)
+    state["session_context"] = deepcopy(context)
+    slot_values = (
+        context.metrics,
+        context.dimensions,
+        context.time_range.labels,
+        context.filters,
+        context.entities,
+        context.analysis_goal,
+    )
+    trace.add_event(
+        EventType.SESSION_CONTEXT_UPDATED,
+        component="session_workflow",
+        action="commit_context",
+        summary="Authoritative session context was updated.",
+        metadata={
+            **_session_metadata(state),
+            "context_field_count": sum(bool(value) for value in slot_values),
+            "was_follow_up": state["was_follow_up"],
+        },
+    )
+    trace.add_event(
+        EventType.SESSION_TURN_COMPLETED,
+        component="session_workflow",
+        action="complete_turn",
+        summary="Session turn completed successfully.",
+        metadata={
+            **_session_metadata(state),
+            "was_follow_up": state["was_follow_up"],
+        },
+    )
+    return True
+
+
+def run_session_turn(
+    state: AgentState,
+    planner: Planner,
+    sql_agent: SQLAgent,
+    reviewer: Reviewer,
+    analyst: Analyst,
+    resolver: FollowUpResolver,
+    extractor: SessionContextExtractor,
+    session_store: SessionMemoryStore,
+    *,
+    trace: TraceCollector,
+) -> SessionTurnRun:
+    """Run one bounded, session-aware DataPilot turn."""
+
+    planning = prepare_session_turn(
+        state,
+        planner,
+        resolver,
+        session_store,
+        trace=trace,
+    )
+    if not planning.can_execute or planning.effective_result is None:
+        return SessionTurnRun(planning=planning, workflow=None)
+    workflow = execute_task_plan(
+        state,
+        sql_agent,
+        reviewer,
+        analyst,
+        trace=trace,
+    )
+    updated = commit_session_context(
+        state,
+        planning.effective_result,
+        workflow,
+        session_store,
+        extractor,
+        trace=trace,
+        resolution=planning.resolution,
+    )
+    return SessionTurnRun(
+        planning=planning,
+        workflow=workflow,
+        memory_updated=updated,
+    )
 
 
 def get_next_ready_task(state: AgentState) -> TaskItem | None:
@@ -354,12 +639,15 @@ def execute_task_plan(
 
 @dataclass(frozen=True, slots=True)
 class GraphSkeleton:
-    """Execute the complete Phase 6 workflow with injected components."""
+    """Execute Phase 6 directly or a configured Phase 7 session turn."""
 
     planner: Planner
     sql_agent: SQLAgent
     reviewer: Reviewer
     analyst: Analyst
+    follow_up_resolver: FollowUpResolver | None = None
+    context_extractor: SessionContextExtractor | None = None
+    session_store: SessionMemoryStore | None = None
     nodes: tuple[str, ...] = GRAPH_NODES
     edges: tuple[tuple[str, str], ...] = GRAPH_EDGES
 
@@ -389,8 +677,25 @@ class GraphSkeleton:
         )
 
     def run(self, state: AgentState, *, trace: TraceCollector) -> AgentState:
-        """Plan, dispatch all ready tasks, and return the updated state."""
+        """Run the configured workflow and return the updated turn state."""
 
+        if (
+            self.follow_up_resolver is not None
+            and self.context_extractor is not None
+            and self.session_store is not None
+        ):
+            run_session_turn(
+                state,
+                self.planner,
+                self.sql_agent,
+                self.reviewer,
+                self.analyst,
+                self.follow_up_resolver,
+                self.context_extractor,
+                self.session_store,
+                trace=trace,
+            )
+            return state
         self.run_planner(state, trace=trace)
         execute_task_plan(
             state,
@@ -407,12 +712,18 @@ def build_graph(
     sql_agent: SQLAgent,
     reviewer: Reviewer,
     analyst: Analyst | None = None,
+    follow_up_resolver: FollowUpResolver | None = None,
+    context_extractor: SessionContextExtractor | None = None,
+    session_store: SessionMemoryStore | None = None,
 ) -> GraphSkeleton:
-    """Inject Phase 6 nodes into the explicit graph structure."""
+    """Inject Phase 6 nodes plus optional Phase 7 session components."""
 
     return GraphSkeleton(
         planner=planner,
         sql_agent=sql_agent,
         reviewer=reviewer,
         analyst=analyst or Analyst(model_client=planner.model_client),
+        follow_up_resolver=follow_up_resolver,
+        context_extractor=context_extractor,
+        session_store=session_store,
     )

@@ -224,6 +224,58 @@ def test_reviewer_detects_dimension_mismatch() -> None:
     assert review.issues[0].issue_type == "dimension_mismatch"
 
 
+def test_reviewer_retry_preserves_current_task_scope() -> None:
+    q2 = _query_task("q2", description="Retrieve Q2 category GMV.")
+    q3 = _query_task("q3", description="Retrieve Q3 category GMV.")
+    state, trace = _state_for(q2, q3)
+    q3.status = "executed"
+    result = SQLResult(
+        task_id="q3",
+        sql=(
+            "SELECT category, SUM(gmv) AS gmv FROM orders "
+            "WHERE quarter = 'Q3' GROUP BY category"
+        ),
+        columns=["category", "gmv"],
+        rows=[{"category": "A", "gmv": 200}],
+        row_count=1,
+    )
+    model = FakeModel([_review_response("approve")])
+
+    Reviewer(model_client=model).review(state, q3, result, trace=trace)
+
+    system_prompt = model.calls[0]["system_prompt"]
+    user_prompt = model.calls[0]["user_prompt"]
+    assert "Review ONLY the current task contract" in system_prompt
+    assert "Do not ask the SQL Agent to duplicate or absorb sibling tasks" in (
+        system_prompt
+    )
+    assert '"task_id":"q3"' in user_prompt
+    assert '"description":"Retrieve Q3 category GMV."' in user_prompt
+
+
+def test_reviewer_does_not_merge_sibling_query_tasks() -> None:
+    q2 = _query_task("q2", description="Retrieve Q2 category GMV.")
+    q3 = _query_task("q3", description="Retrieve Q3 category GMV.")
+    state, trace = _state_for(q2, q3)
+    q3.status = "executed"
+    result = SQLResult(
+        task_id="q3",
+        sql="SELECT category, SUM(gmv) AS gmv FROM orders WHERE quarter = 'Q3'",
+        columns=["category", "gmv"],
+        rows=[{"category": "A", "gmv": 200}],
+        row_count=1,
+    )
+    model = FakeModel([_review_response("approve")])
+
+    Reviewer(model_client=model).review(state, q3, result, trace=trace)
+
+    prompt = model.calls[0]["user_prompt"]
+    assert "Task plan boundaries" in prompt
+    assert '"task_id":"q2"' in prompt
+    assert '"task_id":"q3"' in prompt
+    assert "Sibling tasks define scope boundaries" in prompt
+
+
 def test_reviewer_limits_sample_rows_in_prompt() -> None:
     state, task, result, trace = _executed_state()
     result.rows = [{"row_number": index} for index in range(12)]

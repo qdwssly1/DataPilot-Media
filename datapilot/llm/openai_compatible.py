@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ class OpenAICompatiblePlannerModel:
     api_key: str
     base_url: str
     model: str
-    timeout: float = 30.0
+    timeout: float = 60.0
 
     def __post_init__(self) -> None:
         if not self.api_key.strip():
@@ -31,13 +32,17 @@ class OpenAICompatiblePlannerModel:
         parsed_url = urlparse(self.base_url)
         if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
             raise PlannerConfigurationError("LLM_BASE_URL must be an HTTP(S) URL")
+        if not math.isfinite(self.timeout) or self.timeout <= 0:
+            raise PlannerConfigurationError(
+                "LLM_TIMEOUT_SECONDS must be a positive finite number"
+            )
 
     @classmethod
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
     ) -> OpenAICompatiblePlannerModel:
-        """Build a client from the three documented LLM environment variables."""
+        """Build a client from the documented LLM environment variables."""
 
         values = os.environ if environ is None else environ
         required = ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
@@ -46,10 +51,18 @@ class OpenAICompatiblePlannerModel:
             raise PlannerConfigurationError(
                 f"missing LLM configuration: {', '.join(missing)}"
             )
+        timeout_text = values.get("LLM_TIMEOUT_SECONDS", "").strip() or "60"
+        try:
+            timeout = float(timeout_text)
+        except ValueError as exc:
+            raise PlannerConfigurationError(
+                "LLM_TIMEOUT_SECONDS must be a positive finite number"
+            ) from exc
         return cls(
             api_key=values["LLM_API_KEY"],
             base_url=values["LLM_BASE_URL"],
             model=values["LLM_MODEL"],
+            timeout=timeout,
         )
 
     @property

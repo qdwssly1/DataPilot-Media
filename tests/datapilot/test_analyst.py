@@ -277,6 +277,96 @@ def test_analyst_infers_different_metric_aliases() -> None:
     assert result.derived_values["largest_decline"]["key"] == "A"
 
 
+def test_analyst_rejects_ambiguous_metric_columns() -> None:
+    state = create_initial_state("Compare Q2 and Q3 category GMV")
+    q2 = TaskItem("q2", "Q2 category GMV", "query")
+    q3 = TaskItem("q3", "Q3 category GMV", "query")
+    analysis = TaskItem("compare", "Compare periods", "analysis", ["q2", "q3"])
+    state["task_plan"] = [q2, q3, analysis]
+    state["pending_tasks"] = [analysis]
+    _approve_query(
+        state,
+        q2,
+        [{"category": "A", "gmv": 250}],
+        ["category", "gmv"],
+    )
+    _approve_query(
+        state,
+        q3,
+        [{"category": "A", "q2_gmv": 250, "q3_gmv": 200}],
+        ["category", "q2_gmv", "q3_gmv"],
+    )
+    model = FakeAnalystModel()
+
+    with pytest.raises(AnalystError, match="ambiguous metric columns"):
+        Analyst(model_client=model).execute_task(
+            state,
+            analysis,
+            trace=_trace(state),
+        )
+
+    assert model.calls == []
+    assert state["analysis_results"][-1].success is False
+    assert analysis.status == "failed"
+
+
+def test_analyst_does_not_silently_choose_wrong_period() -> None:
+    state = create_initial_state("Compare Q2 and Q3 category GMV")
+    q2 = TaskItem("q2", "Q2 category GMV", "query")
+    q3 = TaskItem("q3", "Q3 category GMV", "query")
+    analysis = TaskItem("compare", "Compare periods", "analysis", ["q2", "q3"])
+    state["task_plan"] = [q2, q3, analysis]
+    state["pending_tasks"] = [analysis]
+    _approve_query(
+        state,
+        q2,
+        [{"category": "A", "gmv": 250}, {"category": "B", "gmv": 300}],
+        ["category", "gmv"],
+    )
+    _approve_query(
+        state,
+        q3,
+        [
+            {"category": "A", "q2_gmv": 250, "q3_gmv": 200, "decline": 50},
+            {"category": "B", "q2_gmv": 300, "q3_gmv": 370, "decline": -70},
+        ],
+        ["category", "q2_gmv", "q3_gmv", "decline"],
+    )
+
+    with pytest.raises(AnalystError, match="source result contract mismatch"):
+        Analyst(model_client=FakeAnalystModel()).execute_task(
+            state,
+            analysis,
+            trace=_trace(state),
+        )
+
+    assert state["final_answer"] is None
+    assert state["analysis_results"][-1].derived_values == {}
+
+
+def test_real_totals_deterministic_comparison() -> None:
+    result = compare_grouped_metrics(
+        [{"category": "A", "gmv": 250}, {"category": "B", "gmv": 300}],
+        [{"category": "A", "gmv": 200}, {"category": "B", "gmv": 370}],
+        dimension_column="category",
+        metric_column="gmv",
+        left_label="Q2",
+        right_label="Q3",
+    )
+
+    by_category = {item["key"]: item for item in result["comparison"]}
+    assert by_category["A"] == {
+        "key": "A",
+        "Q2": 250.0,
+        "Q3": 200.0,
+        "difference": -50.0,
+        "growth_rate": -0.2,
+    }
+    assert by_category["B"]["difference"] == 70
+    assert by_category["B"]["growth_rate"] == pytest.approx(70 / 300)
+    assert result["largest_decline"]["key"] == "A"
+
+
 def test_growth_rate_calculation() -> None:
     state, task = _comparison_state()
 

@@ -231,6 +231,9 @@ def test_graph_runs_reviewer_and_finishes_available_tasks() -> None:
     assert graph.nodes == (
         "start",
         "planner",
+        "session_context",
+        "follow_up_resolver",
+        "replan",
         "dispatcher",
         "sql_agent",
         "reviewer",

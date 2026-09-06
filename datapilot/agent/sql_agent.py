@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Protocol
 
-from datapilot.agent.state import AgentState, ReviewerResult, SQLResult, TaskItem
+from datapilot.agent.state import (
+    AgentState,
+    ReviewerResult,
+    SQLResult,
+    TaskItem,
+    get_effective_query,
+)
 from datapilot.tools.wren_tools import WrenQueryResult
 from datapilot.tracing.trace import EventType, TraceCollector
 
@@ -93,6 +99,10 @@ class SQLGenerationError(SQLAgentError):
     """Raised when the LLM call or structured SQL output is invalid."""
 
 
+class SQLFilterConsistencyError(SQLAgentError):
+    """Raised when SQL changes an authoritative semantic filter literal."""
+
+
 class SQLPlanningError(SQLAgentError):
     """Raised when Wren cannot dry-plan generated SQL."""
 
@@ -104,6 +114,11 @@ class SQLExecutionError(SQLAgentError):
 SQL_SYSTEM_PROMPT = """You are DataPilot's SQL Agent.
 Generate exactly one read-only SQL query for the current task.
 Use only the supplied Wren context, relevant schema, and verified query examples.
+The original current TaskItem is authoritative. Reviewer feedback may correct SQL
+but must never broaden, replace, or merge its task contract with sibling tasks.
+Preserve every authoritative semantic filter value exactly as provided. Do not
+translate categorical literals. A different value is allowed only when the supplied
+Wren context contains an explicit canonical mapping for that filter and value.
 Do not answer the user, invent data, modify data, or emit Markdown code fences.
 Return one JSON object that exactly matches the supplied schema.
 The sql field must contain SQL only; summary must be a short observable description.
@@ -139,6 +154,13 @@ _DENIED_SQL_TOKENS = {
     "TRUNCATE",
     "UPDATE",
     "VACUUM",
+}
+
+_CANONICAL_MAPPING_KEYS = {
+    "canonical_mappings",
+    "canonical_filter_mappings",
+    "filter_value_mappings",
+    "value_mappings",
 }
 
 
@@ -186,6 +208,131 @@ def _parse_generated_sql(response_text: str) -> GeneratedSQL:
     if len(summary) > 240:
         raise ValueError("summary must be at most 240 characters")
     return GeneratedSQL(sql=sql.strip(), summary=summary)
+
+
+def _authoritative_semantic_filters(
+    state: AgentState,
+) -> dict[str, list[str]]:
+    """Return resolved follow-up filters that govern the current turn."""
+
+    if not state["was_follow_up"]:
+        return {}
+    resolution = state["follow_up_resolution"]
+    if resolution is None or not getattr(resolution, "can_resolve", False):
+        return {}
+    raw_filters = getattr(resolution, "filters", None)
+    if not isinstance(raw_filters, Mapping):
+        return {}
+    return {
+        str(name): [str(value) for value in values]
+        for name, values in raw_filters.items()
+        if isinstance(values, list)
+    }
+
+
+def _iter_canonical_mapping_blocks(value: Any) -> list[Mapping[str, Any]]:
+    """Find only explicitly labelled canonical mapping objects in Wren context."""
+
+    blocks: list[Mapping[str, Any]] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if str(key).casefold() in _CANONICAL_MAPPING_KEYS:
+                if isinstance(child, Mapping):
+                    blocks.append(child)
+                continue
+            blocks.extend(_iter_canonical_mapping_blocks(child))
+    elif isinstance(value, list):
+        for child in value:
+            blocks.extend(_iter_canonical_mapping_blocks(child))
+    return blocks
+
+
+def _allowed_filter_literals(
+    context: Mapping[str, Any],
+    filter_name: str,
+    semantic_value: str,
+) -> set[str]:
+    """Return the source literal plus explicit Wren canonical equivalents."""
+
+    allowed = {semantic_value}
+    for block in _iter_canonical_mapping_blocks(context):
+        field_mapping = block.get(filter_name)
+        if not isinstance(field_mapping, Mapping):
+            continue
+        canonical = field_mapping.get(semantic_value)
+        if isinstance(canonical, str) and canonical:
+            allowed.add(canonical)
+        elif isinstance(canonical, list):
+            allowed.update(
+                value for value in canonical if isinstance(value, str) and value
+            )
+    return allowed
+
+
+def _sql_string_literals(sql: str) -> set[str]:
+    """Extract single-quoted SQL literals after read-only syntax validation."""
+
+    literals: set[str] = set()
+    index = 0
+    while index < len(sql):
+        following = sql[index + 1] if index + 1 < len(sql) else ""
+        if sql[index] == "-" and following == "-":
+            newline = sql.find("\n", index + 2)
+            index = len(sql) if newline < 0 else newline + 1
+            continue
+        if sql[index] == "/" and following == "*":
+            end = sql.find("*/", index + 2)
+            index = len(sql) if end < 0 else end + 2
+            continue
+        if sql[index] != "'":
+            index += 1
+            continue
+        index += 1
+        value: list[str] = []
+        while index < len(sql):
+            if sql[index] != "'":
+                value.append(sql[index])
+                index += 1
+                continue
+            if index + 1 < len(sql) and sql[index + 1] == "'":
+                value.append("'")
+                index += 2
+                continue
+            index += 1
+            literals.add("".join(value))
+            break
+    return literals
+
+
+def validate_semantic_filter_literals(
+    sql: str,
+    *,
+    filters: Mapping[str, list[str]],
+    wren_context: Mapping[str, Any],
+    task_id: str,
+    attempt: int,
+) -> None:
+    """Fail before dry-plan when SQL drops or translates a semantic literal."""
+
+    sql_literals = _sql_string_literals(sql)
+    for filter_name, semantic_values in filters.items():
+        for semantic_value in semantic_values:
+            allowed = _allowed_filter_literals(
+                wren_context,
+                filter_name,
+                semantic_value,
+            )
+            if sql_literals.isdisjoint(allowed):
+                raise SQLFilterConsistencyError(
+                    stage="filter_consistency",
+                    task_id=task_id,
+                    attempt=attempt,
+                    summary=(
+                        "authoritative semantic filter literal missing: "
+                        f"{filter_name}={semantic_value}; preserve it exactly unless "
+                        "Wren context provides an explicit canonical mapping"
+                    ),
+                )
 
 
 def _sql_tokens(sql: str) -> list[str]:
@@ -452,6 +599,7 @@ class SQLAgent:
             metadata=memory_metadata,
         )
 
+        authoritative_filters = _authoritative_semantic_filters(state)
         previous_sql = ""
         previous_error = ""
         last_error: SQLAgentError | None = None
@@ -467,6 +615,7 @@ class SQLAgent:
                     attempt=attempt,
                     semantic_feedback=semantic_feedback,
                     previous_result=previous_result,
+                    authoritative_filters=authoritative_filters,
                 )
                 previous_sql = generated.sql
                 self._add_event(
@@ -493,6 +642,14 @@ class SQLAgent:
                         summary=f"SQL safety rejected the query: {exc.summary}",
                     )
                     raise
+
+                validate_semantic_filter_literals(
+                    generated.sql,
+                    filters=authoritative_filters,
+                    wren_context=context,
+                    task_id=task.task_id,
+                    attempt=attempt,
+                )
 
                 dry_started = perf_counter()
                 self._add_event(
@@ -672,10 +829,21 @@ class SQLAgent:
         attempt: int,
         semantic_feedback: ReviewerResult | None,
         previous_result: SQLResult | None,
+        authoritative_filters: Mapping[str, list[str]],
     ) -> GeneratedSQL:
+        task_contract = {
+            "task_id": task.task_id,
+            "description": task.description,
+            "task_type": task.task_type,
+            "depends_on": task.depends_on,
+        }
         prompt = (
-            f"Original user query:\n{state['original_query']}\n\n"
-            f"Current task:\n{task.description}\n\n"
+            f"Effective user query:\n{get_effective_query(state)}\n\n"
+            "Original current TaskItem (authoritative):\n"
+            f"{_compact_json(task_contract, max_chars=2000)}\n\n"
+            "Authoritative semantic filters (preserve these literal values; only "
+            "an explicit Wren canonical mapping permits conversion):\n"
+            f"{_compact_json(authoritative_filters, max_chars=2000)}\n\n"
             f"Wren context:\n{_compact_json(context, max_chars=8000)}\n\n"
             "Historical verified queries:\n"
             f"{_compact_json(recalled_queries, max_chars=4000)}"
@@ -691,6 +859,9 @@ class SQLAgent:
             prompt += (
                 "\n\nSemantic correction context:\n"
                 "Action: Generate one corrected read-only SQL query.\n"
+                "The original current TaskItem is authoritative. The corrected SQL "
+                "must still satisfy ONLY the original current TaskItem. Reviewer "
+                "feedback cannot redefine the task or absorb sibling tasks.\n"
                 f"Observation: Previous SQL was {previous_result.sql}. "
                 f"It returned columns {previous_result.columns} and "
                 f"row_count {previous_result.row_count}.\n"
