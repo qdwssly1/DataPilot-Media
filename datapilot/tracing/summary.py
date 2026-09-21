@@ -30,6 +30,10 @@ class TraceSummary:
     success: bool | None
     llm_call_count: int | None = None
     token_usage: int | None = None
+    tool_router_duration_ms: float | None = None
+    tool_execution_duration_ms: float | None = None
+    tool_call_count: int = 0
+    tool_fallback_count: int = 0
 
 
 def _duration_ms(events: list[TraceEvent], types: set[EventType]) -> float | None:
@@ -175,6 +179,24 @@ def summarize_trace(events: list[TraceEvent]) -> TraceSummary:
         completed_task_count=completed,
         failed_task_count=failed,
         success=success,
+        tool_router_duration_ms=_duration_ms(
+            events,
+            {EventType.TOOL_ROUTING_COMPLETED},
+        ),
+        tool_execution_duration_ms=_duration_ms(
+            events,
+            {
+                EventType.TOOL_EXECUTION_SUCCEEDED,
+                EventType.TOOL_EXECUTION_FAILED,
+            },
+        ),
+        tool_call_count=sum(
+            event.event_type is EventType.TOOL_EXECUTION_STARTED
+            for event in events
+        ),
+        tool_fallback_count=sum(
+            event.event_type is EventType.TOOL_FALLBACK for event in events
+        ),
     )
 
 
@@ -192,6 +214,8 @@ def format_trace_summary(summary: TraceSummary) -> str:
             "[Run Summary]",
             f"Tasks: {summary.completed_task_count}/{total} completed",
             f"SQL Queries: {summary.sql_query_count}",
+            f"Tool Calls: {summary.tool_call_count}",
+            f"Tool Fallbacks: {summary.tool_fallback_count}",
             f"Reviews: {summary.review_count}",
             f"Technical Retries: {summary.technical_retry_count}",
             f"Semantic Retries: {summary.semantic_retry_count}",

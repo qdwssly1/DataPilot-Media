@@ -155,8 +155,28 @@ class FinalAnswerModel:
         del system_prompt, user_prompt, response_schema
         return json.dumps(
             {
-                "answer": "A declined by 20, or 20%, the largest decline.",
-                "key_findings": ["A difference=-20", "A growth=-20%"],
+                "data_evidence_ids": [
+                    "data:analysis-comparison:1:group:1",
+                    "data:analysis-comparison:1:group:2",
+                ],
+                "knowledge_evidence_ids": [],
+                "inferences": [
+                    {
+                        "bundle_id": "bundle:multi_group:ALL:category",
+                        "claim_type": "observation",
+                        "predicate": "general",
+                        "polarity": "neutral",
+                        "subject_evidence_ids": [],
+                        "supporting_evidence_ids": [
+                            "data:analysis-comparison:1:group:1",
+                            "data:analysis-comparison:1:group:2",
+                        ],
+                    }
+                ],
+                "limitation_ids": [
+                    "limitation:bounded_evidence",
+                    "limitation:limited_time_windows",
+                ],
                 "source_task_ids": ["decline"],
             }
         )

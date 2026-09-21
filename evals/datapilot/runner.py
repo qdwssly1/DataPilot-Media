@@ -210,10 +210,36 @@ def _sql(sql: str) -> str:
 
 
 def _final_answer(source: str) -> str:
+    evidence_ids = (
+        [
+            "data:analysis-comparison:1:group:1",
+            "data:analysis-comparison:1:group:2",
+        ]
+        if source == "analysis"
+        else ["data:result:1"]
+    )
+    limitation_ids = ["limitation:bounded_evidence"]
+    if source == "analysis":
+        limitation_ids.append("limitation:limited_time_windows")
     return json.dumps(
         {
-            "answer": "The verified synthetic result is complete.",
-            "key_findings": ["Used verified task outputs only."],
+            "data_evidence_ids": evidence_ids,
+            "knowledge_evidence_ids": [],
+            "inferences": [
+                {
+                    "bundle_id": (
+                        "bundle:multi_group:ALL:category"
+                        if source == "analysis"
+                        else "bundle:scope:1"
+                    ),
+                    "claim_type": "observation",
+                    "predicate": "general",
+                    "polarity": "neutral",
+                    "subject_evidence_ids": [],
+                    "supporting_evidence_ids": evidence_ids,
+                }
+            ],
+            "limitation_ids": limitation_ids,
             "source_task_ids": [source],
         }
     )

@@ -1,0 +1,11 @@
+timestamp,window_name,region,cdn,service,level,error_code,trace_id,message
+2026-09-01 10:12:00,previous_window,华南,CDN-B,cdn-gateway,INFO,I000,trace-prev-001,Upstream request completed within the normal latency budget.
+2026-09-01 10:31:00,previous_window,华南,CDN-C,player-api,WARN,W201,trace-prev-002,Playback startup latency briefly exceeded the warning threshold.
+2026-09-01 11:05:00,current_window,华南,CDN-B,origin-proxy,ERROR,E302,trace-e302-001,Origin upstream timeout after 3000 ms while fetching a media segment.
+2026-09-01 11:17:00,current_window,华南,CDN-B,cdn-gateway,ERROR,E302,trace-e302-002,CDN upstream timeout propagated from the origin proxy.
+2026-09-01 11:33:00,current_window,华南,CDN-B,origin-proxy,ERROR,E302,trace-e302-003,Repeated upstream timeout while requesting the next video segment.
+2026-09-01 11:36:00,current_window,华南,CDN-B,cdn-gateway,WARN,E302,trace-e302-004,Upstream timeout rate remained above the warning threshold.
+2026-09-01 11:24:00,current_window,华南,CDN-C,player-api,WARN,W201,trace-w201-001,Edge latency increased but requests continued to succeed.
+2026-09-01 11:15:00,current_window,华东,CDN-B,origin-proxy,INFO,I000,trace-east-001,Origin request completed normally.
+2026-08-31 11:22:00,previous_day,华南,CDN-A,player-api,INFO,I000,trace-pd-001,Playback request completed normally.
+2025-09-01 11:18:00,prior_year,华北,CDN-C,cdn-gateway,INFO,I000,trace-py-001,CDN request completed normally.

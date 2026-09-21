@@ -1,0 +1,76 @@
+name: stream_sessions
+properties:
+  description: >-
+    One row per synthetic audio/video playback session. The data contains a
+    current anomaly window plus previous-hour, previous-day, and prior-year
+    comparison windows.
+table_reference:
+  catalog: media
+  schema: main
+  table: stream_sessions
+columns:
+  - name: session_id
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    is_primary_key: true
+    properties:
+      description: Unique playback session identifier.
+  - name: timestamp
+    type: TIMESTAMP
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Session start time in the synthetic UTC timeline.
+  - name: window_name
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: >-
+        Stable fixture label: current_window, previous_window, previous_day,
+        or prior_year.
+  - name: region
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: "Playback region: 华东, 华南, or 华北."
+  - name: cdn
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: "CDN provider: CDN-A, CDN-B, or CDN-C."
+  - name: device
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: "Playback device family: mobile, web, or tv."
+  - name: startup_time
+    type: DOUBLE
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Time to first frame in milliseconds; lower is better.
+  - name: buffer_duration
+    type: DOUBLE
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Total buffering duration during the session in seconds.
+  - name: playback_duration
+    type: DOUBLE
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Total playback duration in seconds, used as the rebuffer denominator.
+  - name: play_success
+    type: BOOLEAN
+    is_calculated: false
+    not_null: true
+    properties:
+      description: True when playback started and completed successfully.
+primary_key: session_id
+cached: false

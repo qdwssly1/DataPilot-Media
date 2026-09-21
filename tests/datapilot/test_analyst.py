@@ -148,8 +148,19 @@ def _valid_analysis_json() -> str:
 def _valid_answer_json(source_id: str = "query") -> str:
     return json.dumps(
         {
-            "answer": "The verified value is 42.",
-            "key_findings": ["value=42"],
+            "data_evidence_ids": ["data:result:1"],
+            "knowledge_evidence_ids": [],
+            "inferences": [
+                {
+                    "bundle_id": "bundle:scope:1",
+                    "claim_type": "observation",
+                    "predicate": "general",
+                    "polarity": "neutral",
+                    "subject_evidence_ids": [],
+                    "supporting_evidence_ids": ["data:result:1"],
+                }
+            ],
+            "limitation_ids": ["limitation:bounded_evidence"],
             "source_task_ids": [source_id],
         }
     )
@@ -434,6 +445,11 @@ def test_analysis_structured_output_retry() -> None:
 
     assert result.retry_count == 1
     assert len(model.calls) == 2
+    assert (
+        'Required top-level fields: ["findings", "source_task_ids", "summary"]'
+        in model.calls[1]["user_prompt"]
+    )
+    assert "with no additional fields" in model.calls[1]["user_prompt"]
     assert EventType.ANALYST_OUTPUT_RETRY in {
         event.event_type for event in trace.get_events()
     }
@@ -451,6 +467,41 @@ def test_analysis_retry_is_bounded() -> None:
         )
 
     assert len(model.calls) == 2
+    assert task.status == "failed"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "summary": "Verified result.",
+            "findings": ["Value is 42."],
+            "source_task_ids": ["query"],
+            "extra": "not allowed",
+        },
+        {
+            "summary": "Verified result.",
+            "source_task_ids": ["query"],
+        },
+        {
+            "analysis_summary": "Verified result.",
+            "findings": ["Value is 42."],
+            "source_task_ids": ["query"],
+        },
+    ],
+    ids=("extra-field", "missing-field", "alias-field"),
+)
+def test_analysis_rejects_non_exact_top_level_fields(
+    payload: dict[str, Any],
+) -> None:
+    state, task = _single_query_state()
+
+    with pytest.raises(AnalystOutputError, match="fields do not match"):
+        Analyst(
+            model_client=FakeAnalystModel([json.dumps(payload)]),
+            max_output_retries=0,
+        ).execute_task(state, task, trace=_trace(state))
+
     assert task.status == "failed"
 
 
@@ -487,6 +538,16 @@ def test_final_answer_uses_verified_data() -> None:
     del analysis
     assert '"value":42' in model.calls[0]["user_prompt"]
     assert "Allowed source_task_ids" in model.calls[0]["user_prompt"]
+    inference_schema = model.calls[0]["response_schema"]["properties"][
+        "inferences"
+    ]["items"]
+    assert len(inference_schema["oneOf"]) == 2
+    assert all({
+        "bundle_id",
+        "predicate",
+        "polarity",
+        "subject_evidence_ids",
+    } <= set(variant["required"]) for variant in inference_schema["oneOf"])
 
 
 def test_final_answer_updates_state() -> None:
@@ -499,7 +560,9 @@ def test_final_answer_updates_state() -> None:
         model_client=FakeAnalystModel([_valid_answer_json()])
     ).generate_final_answer(state, response, trace=_trace(state))
 
-    assert state["final_answer"] == "The verified value is 42."
+    assert "DATA EVIDENCE" in state["final_answer"]
+    assert "value=42" in state["final_answer"]
+    assert "LIMITATION" in state["final_answer"]
     assert state["final_answer_result"] is result
     assert response.status == "completed"
 

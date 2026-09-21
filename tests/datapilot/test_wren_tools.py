@@ -5,12 +5,67 @@ from typing import Any
 from datapilot.tools.wren_tools import (
     WrenConfigurationError,
     WrenToolAdapter,
+    try_fetch_planning_context,
 )
 
 
 class FakeManifestSource:
     def load_manifest(self) -> dict[str, Any]:
-        return {"models": [{"name": "orders", "columns": []}]}
+        return {
+            "models": [
+                {
+                    "name": "orders",
+                    "properties": {"description": "Order facts."},
+                    "tableReference": {"table": "private_orders_table"},
+                    "columns": [
+                        {
+                            "name": "region",
+                            "type": "VARCHAR",
+                            "properties": {"description": "Sales region."},
+                        }
+                    ],
+                }
+            ],
+            "views": [
+                {
+                    "name": "regional_orders",
+                    "statement": (
+                        "SELECT region, SUM(amount) AS revenue "
+                        "FROM private_orders_table GROUP BY region"
+                    ),
+                    "properties": {"description": "Regional rollup."},
+                }
+            ],
+            "cubes": [
+                {
+                    "name": "order_metrics",
+                    "baseObject": "orders",
+                    "dimensions": [
+                        {
+                            "name": "region",
+                            "type": "VARCHAR",
+                            "expression": "region",
+                        }
+                    ],
+                    "timeDimensions": [],
+                    "measures": [
+                        {
+                            "name": "order_count",
+                            "type": "BIGINT",
+                            "expression": "COUNT(*)",
+                        }
+                    ],
+                }
+            ],
+            "relationships": [
+                {
+                    "name": "orders_customer",
+                    "models": ["orders", "customers"],
+                    "joinType": "MANY_TO_ONE",
+                    "condition": "orders.customer_id = customers.id",
+                }
+            ],
+        }
 
 
 class FakeMemoryProvider:
@@ -80,6 +135,77 @@ def test_wren_adapter_uses_real_toolkit_api_shapes() -> None:
         ("dry_plan", "SELECT 1"),
         ("query", ("SELECT 1", 25)),
     ]
+
+
+def test_wren_adapter_projects_lightweight_planning_context() -> None:
+    adapter = WrenToolAdapter(FakeToolkit())
+
+    context = adapter.fetch_planning_context()
+
+    assert context["entities"] == [
+        {
+            "name": "orders",
+            "description": "Order facts.",
+            "important_fields": [
+                {
+                    "name": "region",
+                    "type": "VARCHAR",
+                    "description": "Sales region.",
+                }
+            ],
+        }
+    ]
+    assert context["dimensions"] == [
+        {
+            "name": "region",
+            "type": "VARCHAR",
+            "semantic_object": "order_metrics",
+            "source_entity": "orders",
+        }
+    ]
+    assert context["metrics"] == [
+        {
+            "name": "order_count",
+            "type": "BIGINT",
+            "semantic_object": "order_metrics",
+            "source_entity": "orders",
+        }
+    ]
+    assert context["semantic_objects"] == [
+        {
+            "name": "order_metrics",
+            "queryable_with_sql": False,
+            "base_entity": "orders",
+        }
+    ]
+    assert context["views"] == [
+        {
+            "name": "regional_orders",
+            "available_fields": ["region", "revenue"],
+            "description": "Regional rollup.",
+        }
+    ]
+    assert context["relationships"] == [
+        {
+            "name": "orders_customer",
+            "entities": ["orders", "customers"],
+            "join_type": "MANY_TO_ONE",
+        }
+    ]
+    assert context["truncated"] is False
+    assert "private_orders_table" not in str(context)
+    assert "SELECT" not in str(context)
+    assert "COUNT(*)" not in str(context)
+    assert "customer_id" not in str(context)
+
+
+def test_planning_context_failure_degrades_to_none() -> None:
+    class FailingProvider:
+        def fetch_planning_context(self) -> dict[str, Any]:
+            raise RuntimeError("manifest unavailable")
+
+    assert try_fetch_planning_context(FailingProvider()) is None
+    assert try_fetch_planning_context(object()) is None
 
 
 def test_wren_adapter_exposes_store_but_does_not_hide_verification_boundary() -> None:

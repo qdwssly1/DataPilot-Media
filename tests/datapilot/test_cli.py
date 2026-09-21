@@ -50,6 +50,25 @@ class StaticPlannerModel:
         )
 
 
+class RecordingPlannerModel(StaticPlannerModel):
+    def __init__(self) -> None:
+        self.user_prompts: list[str] = []
+
+    def complete(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+    ) -> str:
+        self.user_prompts.append(user_prompt)
+        return super().complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_schema=response_schema,
+        )
+
+
 class MultiStepPlannerModel:
     def complete(
         self,
@@ -187,6 +206,26 @@ class FakeWrenTools:
         del nl, sql, tags
 
 
+class PlanningContextWrenTools(FakeWrenTools):
+    def fetch_planning_context(self) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "entities": [
+                {
+                    "name": "orders",
+                    "important_fields": [{"name": "gmv", "type": "DECIMAL"}],
+                }
+            ],
+            "metrics": [{"name": "gmv", "source": "orders"}],
+            "truncated": False,
+        }
+
+
+class FailingPlanningContextWrenTools(FakeWrenTools):
+    def fetch_planning_context(self) -> dict[str, Any]:
+        raise RuntimeError("compiled manifest is temporarily unavailable")
+
+
 class ComparisonWrenTools(FakeWrenTools):
     def query(self, sql: str, *, limit: int = 100) -> WrenQueryResult:
         del limit
@@ -270,6 +309,56 @@ def test_cli_prints_real_planner_result_from_injected_model() -> None:
     assert "Retrieve July GMV." in outputs[0]
     assert "SELECT" not in outputs[0].upper()
     assert outputs[1] == WREN_RUNTIME_NOT_CONFIGURED
+
+
+def test_cli_fetches_planning_context_before_planner() -> None:
+    inputs = iter(["分析 7 月 GMV", "exit"])
+    outputs: list[str] = []
+    planner_model = RecordingPlannerModel()
+    tools = PlanningContextWrenTools()
+
+    exit_code = run_cli(
+        input_fn=lambda _: next(inputs),
+        output_fn=outputs.append,
+        planner=Planner(model_client=planner_model),
+        sql_agent=SQLAgent(
+            model_client=StaticSQLModel(),
+            wren_tools=tools,
+        ),
+        reviewer=Reviewer(model_client=StaticReviewerModel()),
+        wren_tools=tools,
+        environ={},
+    )
+
+    assert exit_code == 0
+    assert "Current domain planning context" in planner_model.user_prompts[0]
+    assert '"name":"orders"' in planner_model.user_prompts[0]
+    assert "[Planner]" in outputs[0]
+
+
+def test_cli_planner_continues_when_planning_context_fetch_fails() -> None:
+    inputs = iter(["分析 7 月 GMV", "exit"])
+    outputs: list[str] = []
+    planner_model = RecordingPlannerModel()
+    tools = FailingPlanningContextWrenTools()
+
+    exit_code = run_cli(
+        input_fn=lambda _: next(inputs),
+        output_fn=outputs.append,
+        planner=Planner(model_client=planner_model),
+        sql_agent=SQLAgent(
+            model_client=StaticSQLModel(),
+            wren_tools=tools,
+        ),
+        reviewer=Reviewer(model_client=StaticReviewerModel()),
+        wren_tools=tools,
+        environ={},
+    )
+
+    assert exit_code == 0
+    assert planner_model.user_prompts == ["User query:\n分析 7 月 GMV"]
+    assert "[Planner]" in outputs[0]
+    assert not any("Planner failed" in output for output in outputs)
 
 
 def test_cli_runs_sql_agent_without_fake_final_answer() -> None:
@@ -396,8 +485,28 @@ def test_cli_displays_analyst_and_grounded_final_answer() -> None:
         [
             json.dumps(
                 {
-                    "answer": "A 类 GMV 下降 20（20%），为最大降幅。",
-                    "key_findings": ["A difference=-20", "A growth=-20%"],
+                    "data_evidence_ids": [
+                        "data:analysis-comparison:1:group:1",
+                        "data:analysis-comparison:1:group:2",
+                    ],
+                    "knowledge_evidence_ids": [],
+                    "inferences": [
+                        {
+                            "bundle_id": "bundle:multi_group:ALL:category",
+                            "claim_type": "observation",
+                            "predicate": "general",
+                            "polarity": "neutral",
+                            "subject_evidence_ids": [],
+                            "supporting_evidence_ids": [
+                                "data:analysis-comparison:1:group:1",
+                                "data:analysis-comparison:1:group:2",
+                            ],
+                        }
+                    ],
+                    "limitation_ids": [
+                        "limitation:bounded_evidence",
+                        "limitation:limited_time_windows",
+                    ],
                     "source_task_ids": ["compare"],
                 }
             )
@@ -422,7 +531,8 @@ def test_cli_displays_analyst_and_grounded_final_answer() -> None:
     assert sum("[Reviewer]" in output for output in outputs) == 2
     assert any("[Analyst]" in output for output in outputs)
     assert any("[Final Answer]" in output for output in outputs)
-    assert any("A 类 GMV 下降 20" in output for output in outputs)
+    assert any("category=A" in output for output in outputs)
+    assert not any("A 类是主要变化对象" in output for output in outputs)
 
 
 def test_cli_quit_exits_without_creating_state() -> None:

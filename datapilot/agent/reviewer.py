@@ -15,6 +15,7 @@ from dataclasses import asdict
 from time import perf_counter
 from typing import Any, Protocol
 
+from datapilot.agent.evidence import lossy_categorical_aggregations
 from datapilot.agent.state import (
     AgentState,
     ReviewerIssue,
@@ -58,9 +59,18 @@ class ReviewerRetryLimitError(ReviewerError):
 
 
 REVIEWER_SYSTEM_PROMPT = """You are DataPilot's Semantic Reviewer.
-Decide whether the SQL and its execution result are sufficient for the current task.
+Decide whether the executed SQL or read-only Tool result is sufficient for the
+current task. Tool execution success alone never means the task is complete.
 Check metric, dimensions, time range, filters, aggregation, joins, result relevance,
 and task completeness. You are not the SQL Agent or final analyst.
+Categorical evidence such as status, severity, and error code must retain its
+distribution. MIN/MAX over a categorical field cannot represent all records.
+For a Tool result carrying tool_metadata.alarm_evidence, that object is a
+deterministic summary computed from the filtered raw rows. When it contains total
+count, required categorical distributions, affected objects, and bounded samples,
+review those fields directly; do not require a SQL GROUP BY solely to reproduce
+the same counts. Samples are examples only and never represent every event.
+Still reject missing task filters, time scope, required fields, or irrelevant rows.
 Review ONLY the current task contract. Planner task decomposition is authoritative.
 Do not ask the SQL Agent to duplicate or absorb sibling tasks. If another Planner
 task owns another period, dimension, or analysis step, do not broaden the current
@@ -70,6 +80,9 @@ Return exactly one JSON object matching the supplied schema.
 Use approve only when the result supports the task. Use retry only when one corrected
 SQL query could fix the listed issues. Use fail when correction cannot safely help.
 Keep summaries and retry instructions short and directly actionable.
+Hard output limits: reason_summary and every issue description must each be at
+most 160 characters; retry_instruction must be at most 300 characters. Shorten
+the text before returning JSON. The supplied schema remains authoritative.
 """
 
 ISSUE_TYPES = (
@@ -179,9 +192,7 @@ def _parse_result(
     reason_summary = raw["reason_summary"]
     if not isinstance(reason_summary, str) or not reason_summary.strip():
         raise _output_error(task_id, "reason_summary must not be empty")
-    reason_summary = reason_summary.strip()
-    if len(reason_summary) > 240:
-        raise _output_error(task_id, "reason_summary exceeds 240 characters")
+    reason_summary = reason_summary.strip()[:240]
 
     raw_issues = raw["issues"]
     if not isinstance(raw_issues, list) or len(raw_issues) > 10:
@@ -198,12 +209,7 @@ def _parse_result(
             raise _output_error(task_id, f"issues[{index}].issue_type is invalid")
         if not isinstance(description, str) or not description.strip():
             raise _output_error(task_id, f"issues[{index}].description is empty")
-        description = description.strip()
-        if len(description) > 240:
-            raise _output_error(
-                task_id,
-                f"issues[{index}].description exceeds 240 characters",
-            )
+        description = description.strip()[:240]
         issues.append(
             ReviewerIssue(issue_type=issue_type, description=description)
         )
@@ -212,9 +218,7 @@ def _parse_result(
     if retry_instruction is not None:
         if not isinstance(retry_instruction, str) or not retry_instruction.strip():
             raise _output_error(task_id, "retry_instruction must be null or non-empty")
-        retry_instruction = retry_instruction.strip()
-        if len(retry_instruction) > 400:
-            raise _output_error(task_id, "retry_instruction exceeds 400 characters")
+        retry_instruction = retry_instruction.strip()[:400]
 
     confidence = raw["confidence"]
     if (
@@ -349,6 +353,37 @@ class Reviewer:
             self._record_result(active_trace, review, started_at=started_at)
             return review
 
+        lossy_columns = lossy_categorical_aggregations(result.sql)
+        if lossy_columns:
+            fields = ", ".join(lossy_columns)
+            review = ReviewerResult(
+                task_id=task.task_id,
+                decision="retry",
+                reason_summary=(
+                    "Categorical MIN/MAX loses the observed value distribution "
+                    f"for: {fields}."
+                ),
+                issues=[
+                    ReviewerIssue(
+                        issue_type="aggregation_mismatch",
+                        description=(
+                            "The query collapses categorical evidence with "
+                            f"MIN/MAX: {fields}."
+                        ),
+                    )
+                ],
+                retry_instruction=(
+                    "Preserve each categorical value and its count by grouping "
+                    "on the categorical fields or by returning individual rows; "
+                    "do not use MIN/MAX to represent multiple records."
+                ),
+                confidence=1.0,
+                review_retry_count=review_retry_count,
+            )
+            self._apply_review(state, task, review)
+            self._record_result(active_trace, review, started_at=started_at)
+            return review
+
         prompt = self._build_prompt(
             state,
             task,
@@ -440,6 +475,9 @@ class Reviewer:
             "description": task.description,
             "task_type": task.task_type,
             "depends_on": task.depends_on,
+            "metric_binding": task.metric_binding,
+            "requested_dimensions": task.requested_dimensions,
+            "window_role_binding": task.window_role_binding,
         }
         task_boundaries = [
             {
@@ -457,7 +495,13 @@ class Reviewer:
             f"{_compact_json(task_boundaries, max_chars=4000)}\n"
             "Sibling tasks define scope boundaries only; never merge them into "
             "the current task.\n\n"
-            f"SQL:\n{result.sql}\n\n"
+            "Query execution source:\n"
+            f"source={result.execution_source}\n"
+            f"tool_name={result.tool_name}\n"
+            f"tool_input={_compact_json(result.tool_input, max_chars=2000)}\n"
+            f"tool_metadata={_compact_json(result.tool_metadata, max_chars=3000)}\n\n"
+            f"Executed query (SQL Agent or deterministic tool implementation):\n"
+            f"{result.sql}\n\n"
             "Execution metadata:\n"
             f"columns={_compact_json(result.columns, max_chars=1000)}\n"
             f"row_count={result.row_count}\n"

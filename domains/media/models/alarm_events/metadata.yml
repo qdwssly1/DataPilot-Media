@@ -1,0 +1,73 @@
+name: alarm_events
+properties:
+  description: >-
+    One row per synthetic operational alarm. Alarm timestamps share the same
+    comparison windows as stream_sessions. E302 means a CDN upstream request
+    timeout in this fixture. Temporal correlation is evidence of a possible
+    cause, not proof of causality.
+table_reference:
+  catalog: media
+  schema: main
+  table: alarm_events
+columns:
+  - name: alarm_id
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    is_primary_key: true
+    properties:
+      description: Unique alarm event identifier.
+  - name: timestamp
+    type: TIMESTAMP
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Time when the alarm event was emitted.
+  - name: window_name
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: >-
+        Stable fixture label aligned with stream_sessions: current_window,
+        previous_window, previous_day, or prior_year.
+  - name: region
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: "Affected playback region: 华东, 华南, or 华北."
+  - name: cdn
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: "Affected CDN provider: CDN-A, CDN-B, or CDN-C."
+  - name: error_code
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: >-
+        Operational alarm code. E302 identifies CDN upstream request timeout
+        alarms in this deterministic fixture.
+  - name: severity
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: "Alarm severity enum: low, medium, or high."
+  - name: status
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Alarm lifecycle status such as open, investigating, or resolved.
+  - name: message
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Human-readable operational symptom recorded by the alarm.
+primary_key: alarm_id
+cached: false

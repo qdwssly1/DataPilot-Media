@@ -1,0 +1,67 @@
+name: transcode_jobs
+properties:
+  description: >-
+    Deterministic read-only transcode job status fixture. It represents status
+    records only and never invokes FFmpeg or a production transcode platform.
+table_reference:
+  catalog: media
+  schema: main
+  table: transcode_jobs
+columns:
+  - name: job_id
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    is_primary_key: true
+    properties:
+      description: Unique synthetic transcode job identifier.
+  - name: timestamp
+    type: TIMESTAMP
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Time when the synthetic job status was recorded.
+  - name: window_name
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Stable fixture window label shared with other Media models.
+  - name: region
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Region where the synthetic job was scheduled.
+  - name: codec
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Output codec H.264, H.265, or AV1.
+  - name: status
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Job state queued, running, succeeded, or failed.
+  - name: error_code
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Synthetic failure code, or NONE when no failure is recorded.
+  - name: duration
+    type: DOUBLE
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Observed processing duration in seconds at this fixture point.
+  - name: gpu_pool
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Synthetic GPU pool identifier gpu-a, gpu-b, or gpu-c.
+primary_key: job_id
+cached: false

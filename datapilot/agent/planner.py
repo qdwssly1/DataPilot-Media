@@ -14,6 +14,7 @@ from time import perf_counter
 from typing import Any, Protocol
 
 from datapilot.agent.state import AgentState, TaskItem, get_effective_query
+from datapilot.retrieval.integration import compact_knowledge_evidence
 from datapilot.tracing.trace import EventType, TraceCollector
 
 
@@ -66,14 +67,96 @@ class PlannerModel(Protocol):
 SYSTEM_PROMPT = """You are DataPilot's task planner.
 Only classify the request, decompose data work into tasks, and define dependencies.
 Do not generate SQL, execute SQL, call tools, guess data, or answer the question.
+When a current domain planning context is supplied, treat its listed capabilities
+as the authoritative planning boundary. Query task descriptions may use only the
+listed entities, fields, dimensions, time dimensions, metrics, views, and
+relationships. Do not invent unavailable schema concepts or treat an alarm field
+as a session field. A view may use only its explicitly listed available_fields;
+never project fields from an entity onto a view. Only entities and views are SQL
+query targets. Semantic objects with queryable_with_sql=false define metrics and
+dimensions but are not tables; use each metric's source_entity in query tasks.
+Retrieved domain knowledge is advisory terminology and procedure context, not
+database schema or observed data. It may justify a knowledge-only response task,
+but must never be turned into a query field, table, alarm, or measured fact.
+Use exact schema identifiers in query task descriptions so the SQL Agent receives
+an implementable contract. If a requested breakdown is unavailable, omit it and
+plan the supported analysis or a grounded response that states the limitation.
+When lifecycle status or other categorical evidence is available and relevant,
+plan either individual records or counts grouped by that categorical field. Do
+not substitute an active count, MIN/MAX value, or representative field for the
+full observed distribution.
+For alarm tasks, request total count, status/severity/error-code distributions,
+affected objects, and bounded raw message samples only when troubleshooting needs
+text examples. Samples are examples, not a distribution or a statement about all
+events. Never request representative_message, MIN/MAX(message), MIN/MAX(status),
+or any arbitrary representative textual aggregation. A deterministic summary
+built from the filtered raw alarm rows satisfies these distribution requirements.
 Return one JSON object that exactly matches the provided schema.
 Keep reason_summary short and state only the observable decision reason.
 All tasks must start with status 'pending' and may depend only on earlier tasks.
 For a database question, end the plan with a response task grounded in completed
 query or analysis tasks. For a comparison, use separate query tasks when needed,
 then an analysis task for calculations, then a response task. Never put SQL in a
-task description.
+task description. Reserve exactly two query dependencies on an analysis task for
+a same-metric grouped comparison. When correlating different metric families,
+create at least three query tasks: separate target-metric comparison inputs plus
+an independent evidence query, then make the analysis depend on all of them.
+For any decline, growth, change, contribution, or comparison by a group, require
+matched baseline and current values for the same metric and grouping dimension.
+A current-only grouped result cannot establish change or rank the largest decline.
+Describe the query so it returns both windows directly or creates paired baseline
+and current query inputs; never ask Analyst to infer a delta from current values.
+For every metric-bearing query task, add metric_binding with exactly one
+primary_metric from the domain context, its unit and aggregation_semantics, and
+supporting_fields that may validate or recompute it. Supporting numeric fields are
+not alternative primary metrics. Add requested_dimensions using exact schema names.
+For a time comparison, also add one shared window_role_binding to every participating
+query task: comparison_target is the current window, baseline_windows lists every
+requested baseline, and primary_baseline is a baseline only when the user or task
+explicitly selects one. Never silently choose a primary from multiple baselines.
+For non-metric or non-comparison tasks, return null metric/window bindings and an
+empty requested_dimensions list. The parser still accepts legacy saved plans that
+predate these fields, but new structured Planner output must include them.
 """
+
+_METRIC_BINDING_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "required": [
+        "primary_metric",
+        "unit",
+        "aggregation_semantics",
+        "supporting_fields",
+    ],
+    "properties": {
+        "primary_metric": {"type": "string", "minLength": 1},
+        "unit": {"type": "string", "minLength": 1},
+        "aggregation_semantics": {"type": "string", "minLength": 1},
+        "supporting_fields": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+        },
+    },
+}
+
+_WINDOW_ROLE_BINDING_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "required": [
+        "comparison_target",
+        "baseline_windows",
+        "primary_baseline",
+    ],
+    "properties": {
+        "comparison_target": {"type": "string", "minLength": 1},
+        "baseline_windows": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1},
+        },
+        "primary_baseline": {"type": ["string", "null"]},
+    },
+}
 
 PLANNER_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -104,6 +187,9 @@ PLANNER_RESPONSE_SCHEMA: dict[str, Any] = {
                     "task_type",
                     "depends_on",
                     "status",
+                    "metric_binding",
+                    "requested_dimensions",
+                    "window_role_binding",
                 ],
                 "properties": {
                     "task_id": {"type": "string", "minLength": 1},
@@ -117,6 +203,12 @@ PLANNER_RESPONSE_SCHEMA: dict[str, Any] = {
                         "items": {"type": "string"},
                     },
                     "status": {"type": "string", "enum": ["pending"]},
+                    "metric_binding": _METRIC_BINDING_SCHEMA,
+                    "requested_dimensions": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                    },
+                    "window_role_binding": _WINDOW_ROLE_BINDING_SCHEMA,
                 },
             },
         },
@@ -127,9 +219,49 @@ PLANNER_RESPONSE_SCHEMA: dict[str, Any] = {
 }
 
 _TOP_LEVEL_FIELDS = frozenset(PLANNER_RESPONSE_SCHEMA["required"])
-_TASK_FIELDS = frozenset(
-    PLANNER_RESPONSE_SCHEMA["properties"]["tasks"]["items"]["required"]
+_TASK_REQUIRED_FIELDS = frozenset(
+    {"task_id", "description", "task_type", "depends_on", "status"}
 )
+_TASK_ALLOWED_FIELDS = frozenset(
+    PLANNER_RESPONSE_SCHEMA["properties"]["tasks"]["items"]["properties"]
+)
+
+
+def _build_user_prompt(
+    state: AgentState,
+    planning_context: Mapping[str, Any] | None,
+) -> str:
+    query = get_effective_query(state)
+    sections = [f"User query:\n{query}"]
+    if planning_context is not None:
+        context_json = json.dumps(
+            dict(planning_context),
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
+        )
+        sections.append(
+            "Current domain planning context (read-only and authoritative for "
+            "database capabilities):\n"
+            f"{context_json}\n\n"
+            "Use this context only to choose feasible tasks and dependencies. "
+            "Do not generate SQL, query data, or copy schema text into the answer."
+        )
+    knowledge = compact_knowledge_evidence(
+        state,
+        max_items=4,
+        max_text_chars=500,
+    )
+    if knowledge:
+        sections.append(
+            "Retrieved domain knowledge (advisory; not schema and not observed "
+            "data):\n"
+            f"{json.dumps(knowledge, ensure_ascii=False, separators=(',', ':'))}\n\n"
+            "Use it only to understand domain concepts or plan a response. A "
+            "knowledge-only request may be a simple_question with one response "
+            "task and no database query."
+        )
+    return "\n\n".join(sections)
 
 
 def _require_exact_fields(
@@ -148,6 +280,115 @@ def _require_exact_fields(
     )
 
 
+def _require_allowed_fields(
+    value: Mapping[str, Any],
+    *,
+    required: frozenset[str],
+    allowed: frozenset[str],
+    location: str,
+) -> None:
+    actual = frozenset(value)
+    missing = sorted(required - actual)
+    extra = sorted(actual - allowed)
+    if not missing and not extra:
+        return
+    raise PlannerOutputError(
+        f"{location} fields are invalid; missing={missing}, extra={extra}"
+    )
+
+
+def _parse_metric_binding(raw: Any, *, location: str) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise PlannerOutputError(f"{location} must be an object or null")
+    expected = frozenset(_METRIC_BINDING_SCHEMA["required"])
+    _require_exact_fields(raw, expected, location=location)
+    for field_name in ("primary_metric", "unit", "aggregation_semantics"):
+        value = raw[field_name]
+        if not isinstance(value, str) or not value.strip():
+            raise PlannerOutputError(f"{location}.{field_name} must not be empty")
+    supporting = raw["supporting_fields"]
+    if not isinstance(supporting, list) or not all(
+        isinstance(item, str) and item.strip() for item in supporting
+    ):
+        raise PlannerOutputError(
+            f"{location}.supporting_fields must be a string list"
+        )
+    normalized_supporting = [item.strip() for item in supporting]
+    if len(normalized_supporting) != len(set(normalized_supporting)):
+        raise PlannerOutputError(
+            f"{location}.supporting_fields contains duplicates"
+        )
+    primary = raw["primary_metric"].strip()
+    if primary in normalized_supporting:
+        raise PlannerOutputError(
+            f"{location}.supporting_fields must not include primary_metric"
+        )
+    return {
+        "primary_metric": primary,
+        "unit": raw["unit"].strip(),
+        "aggregation_semantics": raw["aggregation_semantics"].strip(),
+        "supporting_fields": normalized_supporting,
+    }
+
+
+def _parse_window_role_binding(raw: Any, *, location: str) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise PlannerOutputError(f"{location} must be an object or null")
+    expected = frozenset(_WINDOW_ROLE_BINDING_SCHEMA["required"])
+    _require_exact_fields(raw, expected, location=location)
+    target = raw["comparison_target"]
+    baselines = raw["baseline_windows"]
+    primary = raw["primary_baseline"]
+    if not isinstance(target, str) or not target.strip():
+        raise PlannerOutputError(f"{location}.comparison_target must not be empty")
+    if not isinstance(baselines, list) or not baselines or not all(
+        isinstance(item, str) and item.strip() for item in baselines
+    ):
+        raise PlannerOutputError(
+            f"{location}.baseline_windows must be a non-empty string list"
+        )
+    normalized_baselines = [item.strip() for item in baselines]
+    if len(normalized_baselines) != len(set(normalized_baselines)):
+        raise PlannerOutputError(f"{location}.baseline_windows contains duplicates")
+    target = target.strip()
+    if target in normalized_baselines:
+        raise PlannerOutputError(
+            f"{location}.comparison_target cannot also be a baseline"
+        )
+    if primary is not None:
+        if not isinstance(primary, str) or not primary.strip():
+            raise PlannerOutputError(
+                f"{location}.primary_baseline must be a string or null"
+            )
+        primary = primary.strip()
+        if primary not in normalized_baselines:
+            raise PlannerOutputError(
+                f"{location}.primary_baseline must be listed in baseline_windows"
+            )
+    return {
+        "comparison_target": target,
+        "baseline_windows": normalized_baselines,
+        "primary_baseline": primary,
+    }
+
+
+def _parse_dimensions(raw: Any, *, location: str) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not all(
+        isinstance(item, str) and item.strip() for item in raw
+    ):
+        raise PlannerOutputError(f"{location} must be a string list")
+    dimensions = [item.strip() for item in raw]
+    if len(dimensions) != len(set(dimensions)):
+        raise PlannerOutputError(f"{location} contains duplicates")
+    return dimensions
+
+
 def _require_bool(value: Any, *, field_name: str) -> bool:
     if type(value) is not bool:
         raise PlannerOutputError(f"{field_name} must be a boolean")
@@ -157,7 +398,12 @@ def _require_bool(value: Any, *, field_name: str) -> bool:
 def _parse_task(raw_task: Any, *, known_ids: set[str], index: int) -> TaskItem:
     if not isinstance(raw_task, dict):
         raise PlannerOutputError(f"tasks[{index}] must be an object")
-    _require_exact_fields(raw_task, _TASK_FIELDS, location=f"tasks[{index}]")
+    _require_allowed_fields(
+        raw_task,
+        required=_TASK_REQUIRED_FIELDS,
+        allowed=_TASK_ALLOWED_FIELDS,
+        location=f"tasks[{index}]",
+    )
 
     task_id = raw_task["task_id"]
     description = raw_task["description"]
@@ -197,6 +443,18 @@ def _parse_task(raw_task: Any, *, known_ids: set[str], index: int) -> TaskItem:
         task_type=task_type,
         depends_on=list(depends_on),
         status="pending",
+        metric_binding=_parse_metric_binding(
+            raw_task.get("metric_binding"),
+            location=f"tasks[{index}].metric_binding",
+        ),
+        requested_dimensions=_parse_dimensions(
+            raw_task.get("requested_dimensions"),
+            location=f"tasks[{index}].requested_dimensions",
+        ),
+        window_role_binding=_parse_window_role_binding(
+            raw_task.get("window_role_binding"),
+            location=f"tasks[{index}].window_role_binding",
+        ),
     )
 
 
@@ -287,6 +545,7 @@ class Planner:
         state: AgentState,
         *,
         trace: TraceCollector,
+        planning_context: Mapping[str, Any] | None = None,
     ) -> PlannerResult:
         """Create a validated plan and write it into the supplied AgentState."""
 
@@ -307,7 +566,7 @@ class Planner:
             try:
                 response_text = self.model_client.complete(
                     system_prompt=SYSTEM_PROMPT,
-                    user_prompt=f"User query:\n{get_effective_query(state)}",
+                    user_prompt=_build_user_prompt(state, planning_context),
                     response_schema=PLANNER_RESPONSE_SCHEMA,
                 )
             except Exception as exc:

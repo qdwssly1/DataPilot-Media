@@ -1,0 +1,1131 @@
+{
+  "scope": "DataPilot-Media Phase 2 verification: three authorized questions; Case B replayed twice after observed contract failures.",
+  "result": "Workflow completed for A, B, C under the reported model routing. Case B answer fact audit FAILED; Phase 2 is not a clean end-to-end quality pass.",
+  "terminology": {
+    "success": "The original runner success field records workflow completion only, not manual factual acceptance.",
+    "semantic_backend": "Domain alias expansion plus TF-IDF feature hashing and cosine similarity; not a pretrained semantic sentence encoder.",
+    "recall": "Macro recall over 14 relevant queries; 1 unrelated query evaluated separately.",
+    "mrr": "Reciprocal rank within the top-3 returned chunks (MRR@3).",
+    "latency": "Per-run wall_latency_ms excludes Wren/retriever initialization and retrieval; retrieval has its own measured latency.",
+    "retries": "SQL technical, SQL semantic, and structured-output retries are separate; Case B full reruns are recorded as separate runs."
+  },
+  "retrieval_evaluation": {
+    "corpus": {
+      "chunks": 16,
+      "average_chunk_length": 617.3125,
+      "semantic_backend": "local concept-aware dense feature hashing"
+    },
+    "cases": 15,
+    "lexical": {
+      "recall_at_1": 0.7857142857142857,
+      "recall_at_3": 1,
+      "mrr": 0.9285714285714286,
+      "unrelated_no_result_accuracy": 1,
+      "mean_latency_ms": 0.5728400001923243,
+      "max_latency_ms": 0.9623999940231442
+    },
+    "semantic": {
+      "recall_at_1": 0.5714285714285714,
+      "recall_at_3": 0.9285714285714286,
+      "mrr": 0.7619047619047619,
+      "unrelated_no_result_accuracy": 1,
+      "mean_latency_ms": 0.62049999833107,
+      "max_latency_ms": 1.1165000032633543
+    },
+    "hybrid": {
+      "recall_at_1": 0.7142857142857143,
+      "recall_at_3": 1,
+      "mrr": 0.8928571428571429,
+      "unrelated_no_result_accuracy": 1,
+      "mean_latency_ms": 0.8022133338575562,
+      "max_latency_ms": 2.5127000408247113
+    },
+    "hybrid_rerank": {
+      "recall_at_1": 0.9285714285714286,
+      "recall_at_3": 1,
+      "mrr": 1,
+      "unrelated_no_result_accuracy": 1,
+      "mean_latency_ms": 2.3118333347762623,
+      "max_latency_ms": 6.616999977268279
+    },
+    "llm_calls": 0,
+    "retries": 0
+  },
+  "tests": {
+    "media": 16,
+    "datapilot": 184,
+    "total": 200,
+    "result": "passed",
+    "elapsed_seconds": 0.85
+  },
+  "runtime": {
+    "python": "3.12.14",
+    "venv": true,
+    "wren_project": "domains/media",
+    "wren_profile": "datapilot_media_duckdb",
+    "wren_sql_memory_enabled": false,
+    "wren_validate": "Valid: 2 models, 2 views, 0 relationships",
+    "wren_build": "success with PYTHONUTF8=1"
+  },
+  "runs": [
+    {
+      "id": "A-flash",
+      "raw_result": {
+        "case": "a",
+        "query": "E302 是什么？",
+        "success": true,
+        "tasks": [
+          {
+            "task_id": "t1",
+            "description": "Explain that E302 denotes a CDN upstream request timeout alarm: a CDN edge or intermediate node waited beyond the timeout threshold for an upstream (origin) response. Summarize common triggers (origin overload, unhealthy origin route, packet loss, overly short upstream timeout, slow object generation) and note that it is distinct from E503, which indicates origin/service unavailability rather than waiting past a timeout. Mention that it is an operational alarm symptom, not proof of root cause.",
+            "task_type": "response",
+            "depends_on": [],
+            "status": "completed"
+          }
+        ],
+        "retrieval": {
+          "calls": 1,
+          "latency_ms": 1.5595000004395843,
+          "chunk_ids": [
+            "media-error-codes::01-e302-cdn-upstream-timeout",
+            "media-error-codes::03-e503-origin-or-service-unavailable",
+            "media-troubleshooting-sop::01-cdn-playback-success-degradation-sop"
+          ]
+        },
+        "sql_results": [],
+        "reviewer_results": [],
+        "analysis_results": [],
+        "final_answer": "DATA EVIDENCE: No database facts were queried. Verified query results and completed analysis results were both empty, so no alarm instance, SQL result, or observed metric is reported here.\n\nKNOWLEDGE EVIDENCE: E302 is a CDN upstream request timeout alarm: a CDN edge or intermediate node waited beyond the timeout threshold for an upstream (origin) response. Documented common triggers include origin overload, an unhealthy origin route, packet loss between CDN and origin, an overly short upstream timeout, and slow object generation [knowledge:media-error-codes::01-e302-cdn-upstream-timeout]. E302 is distinct from E503, which indicates that an origin or dependent service was unavailable or had no healthy capacity — E503 reports unavailability, while E302 reports waiting beyond a timeout threshold [knowledge:media-error-codes::03-e503-origin-or-service-unavailable]. When triaging, the SOP advises defining equal baseline and current windows, recomputing playback success from successful and total sessions (not averaging ratios), breaking down by available dimensions such as region and CDN, and for E302 inspecting upstream latency, timeout rate, origin health, and routing; concurrent alarms are correlation [knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop].\n\nINFERENCE: E302 is best read as an operational alarm symptom of upstream latency/timeout, i.e. a pointer to where to look, not a proven root cause.\n\nLIMITATION: Neither knowledge chunk establishes that E302 caused any QoE decline; temporal overlap between an alarm and a metric change is correlation only. No request traces, origin telemetry, routing data, or controlled mitigation were supplied, so causality remains unproven. No database facts were queried, so no region, CDN, volume, timeout rate, or timing value is asserted.",
+        "memory_updated": true,
+        "trace_summary": {
+          "trace_id": "ff3ccfc5-88f0-41cc-8ef5-196accced4bc",
+          "total_duration_ms": 12149.367,
+          "planner_duration_ms": 1383.1493000034243,
+          "sql_agent_duration_ms": null,
+          "reviewer_duration_ms": null,
+          "analyst_duration_ms": null,
+          "final_answer_duration_ms": 6616.486200015061,
+          "sql_query_count": 0,
+          "review_count": 0,
+          "technical_retry_count": 0,
+          "semantic_retry_count": 0,
+          "follow_up_resolution_count": 0,
+          "task_count": 1,
+          "completed_task_count": 1,
+          "failed_task_count": 0,
+          "success": true,
+          "llm_call_count": null,
+          "token_usage": null
+        },
+        "llm": {
+          "calls": 4,
+          "by_component": {
+            "final_answer": 2,
+            "other": 1,
+            "planner": 1
+          },
+          "total_latency_ms": 12098.807300091721
+        },
+        "wall_latency_ms": 12148.083799984306
+      },
+      "verified_llm_by_component": {
+        "planner": 1,
+        "final_answer": 2,
+        "session_memory": 1
+      },
+      "structured_output_retries": {
+        "analyst_output_retry": 1
+      },
+      "fact_audit": "Pass for knowledge-only explanation. No SQL facts claimed.",
+      "instrumentation_note": "The old classifier labeled session extraction as 'other'. Two final-answer calls indicate the one allowed structured-output retry."
+    },
+    {
+      "id": "B-flash-failed",
+      "raw_result": {
+        "case": "b",
+        "query": "华南地区播放成功率下降，并出现 E302 告警，应该怎么排查？",
+        "success": false,
+        "error": "ReviewerOutputError: structured_output failed for task t1: reason_summary exceeds 240 characters",
+        "tasks": [
+          {
+            "task_id": "t1",
+            "description": "单查询任务：在 stream_sessions 中过滤 region='华南' 与 window_name='current_window'，按 cdn 汇总 session_count、successful_sessions、failed_sessions，并由成功数与会话数重算 playback_success_rate，用于确认当前窗口整体降幅与各 CDN 失败量贡献。",
+            "task_type": "query",
+            "depends_on": [],
+            "status": "failed"
+          },
+          {
+            "task_id": "t2",
+            "description": "单查询任务：在 stream_sessions 中过滤 region='华南' 且 window_name 属于 ('previous_window','previous_day','prior_year')，按 window_name、cdn 汇总 session_count、successful_sessions、failed_sessions 并重算 playback_success_rate，提供与当前窗口等口径的基线对比。",
+            "task_type": "query",
+            "depends_on": [],
+            "status": "pending"
+          },
+          {
+            "task_id": "t3",
+            "description": "单查询任务：在 alarm_events 中过滤 region='华南' 与 error_code='E302'，按 window_name、cdn、severity、status 汇总告警数量，并取代表性 message，作为与播放成功率下降做时间、区域、CDN 匹配的独立证据。",
+            "task_type": "query",
+            "depends_on": [],
+            "status": "pending"
+          },
+          {
+            "task_id": "t4",
+            "description": "分析任务：基于 t1、t2、t3 结果，由计数重算当前与基线的成功率变化及失败会话量变化，定位失败贡献最大的 CDN；同时对齐 E302 告警的窗口、区域与 CDN 分布，标注时间相关性仅作为可能原因线索而非因果证明，并给出证据缺口。",
+            "task_type": "analysis",
+            "depends_on": [
+              "t1",
+              "t2",
+              "t3"
+            ],
+            "status": "pending"
+          },
+          {
+            "task_id": "t5",
+            "description": "响应任务：结合 t4 的对比与告警关联结果，给出华南播放成功率下降且伴随 E302 的排查回答，包含确认降幅、按 CDN 定位、核对 E302 告警范围与上游超时方向，并说明相关性不等于因果。",
+            "task_type": "response",
+            "depends_on": [
+              "t4"
+            ],
+            "status": "pending"
+          }
+        ],
+        "retrieval": {
+          "calls": 1,
+          "latency_ms": 1.8999000312760472,
+          "chunk_ids": [
+            "media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+            "media-error-codes::01-e302-cdn-upstream-timeout",
+            "media-qoe-metrics::01-playback-success-rate",
+            "media-qoe-metrics::04-failed-session-count",
+            "media-troubleshooting-sop::02-startup-latency-increase-sop"
+          ]
+        },
+        "sql_results": [
+          {
+            "task_id": "t1",
+            "sql": "SELECT\n  cdn,\n  COUNT(*) AS session_count,\n  SUM(CASE WHEN play_success THEN 1 ELSE 0 END) AS successful_sessions,\n  SUM(CASE WHEN play_success THEN 0 ELSE 1 END) AS failed_sessions,\n  CAST(SUM(CASE WHEN play_success THEN 1 ELSE 0 END) AS DOUBLE)\n    / NULLIF(COUNT(*), 0) AS playback_success_rate\nFROM stream_sessions\nWHERE region = '华南'\n  AND window_name = 'current_window'\nGROUP BY cdn\nORDER BY cdn",
+            "success": true,
+            "columns": [
+              "cdn",
+              "session_count",
+              "successful_sessions",
+              "failed_sessions",
+              "playback_success_rate"
+            ],
+            "rows": [
+              {
+                "cdn": "CDN-A",
+                "session_count": 20,
+                "successful_sessions": "17",
+                "failed_sessions": "3",
+                "playback_success_rate": 0.85
+              },
+              {
+                "cdn": "CDN-B",
+                "session_count": 20,
+                "successful_sessions": "10",
+                "failed_sessions": "10",
+                "playback_success_rate": 0.5
+              },
+              {
+                "cdn": "CDN-C",
+                "session_count": 20,
+                "successful_sessions": "16",
+                "failed_sessions": "4",
+                "playback_success_rate": 0.8
+              }
+            ],
+            "row_count": 3,
+            "error": null,
+            "retry_count": 0,
+            "semantic_retry_count": 0,
+            "execution_time": 1.760336700011976,
+            "context_summary": "{\"strategy\":\"full\",\"schema\":\"Catalog: wren, Schema: public\\n\\n### Model: alarm_events — One row per synthetic operational alarm. Alarm timestamps share the same comparison windows as stream_sessions. E302 means a CDN upstream request timeout in this fixture. Temporal correlation is evidence of a possible cause, not proof of causality.\\n  Primary key: alarm_id\\n  Columns:\\n    - alarm_id (VARCHAR) — Unique alarm event identifier. NOT NULL PRIMARY KEY\\n    - timestamp (TIMESTAMP) — Time when th..."
+          }
+        ],
+        "reviewer_results": [],
+        "llm": {
+          "calls": 4,
+          "by_component": {
+            "planner": 1,
+            "sql_agent": 3
+          }
+        },
+        "wall_latency_ms": 14227.562199928798
+      },
+      "verified_llm_by_component": {
+        "planner": 1,
+        "sql_agent": 1,
+        "reviewer": 2
+      },
+      "structured_output_retries": {
+        "review_output_retry": 1
+      },
+      "fact_audit": "No final answer emitted; fail-closed on Reviewer reason_summary length.",
+      "instrumentation_note": "The initial classifier matched 'SQL Agent' mentioned inside the Reviewer system prompt, mislabeling two Reviewer calls. Raw result is preserved."
+    },
+    {
+      "id": "C-flash",
+      "raw_result": {
+        "case": "c",
+        "query": "首帧耗时升高应该检查什么？",
+        "success": true,
+        "tasks": [
+          {
+            "task_id": "t1",
+            "description": "依据启动延迟升高 SOP 与首帧耗时定义，给出排查清单：先用匹配基线/当前窗口对比平均与 P95 首帧耗时并同时观察播放成功率与会话量，再按 region、cdn、device 维度下钻定位，最后核查 DNS/连接/TLS、清单与首段延迟、CDN 缓存命中、上游延迟、播放器初始化与解码就绪，并关联告警事件（E302 等）作为可能原因的佐证；同时说明所用指标口径与 P95 非均值乘系数的计算规则。",
+            "task_type": "response",
+            "depends_on": [],
+            "status": "completed"
+          }
+        ],
+        "retrieval": {
+          "calls": 1,
+          "latency_ms": 1.3247999595478177,
+          "chunk_ids": [
+            "media-qoe-metrics::03-startup-time-and-startup-time-p95",
+            "media-troubleshooting-sop::02-startup-latency-increase-sop"
+          ]
+        },
+        "sql_results": [],
+        "reviewer_results": [],
+        "analysis_results": [],
+        "final_answer": "【DATA EVIDENCE】本次未查询任何数据库事实，无已核验的查询结果或分析结果（已提供的结果集为空），以下全部为文档/SOP 知识，不是观测到的告警或 SQL 事实。\n\n【KNOWLEDGE EVIDENCE】首帧耗时（Startup Time / TTFF）定义为从有效播放请求到首个可解码音视频帧被渲染的耗时，单位为毫秒；P95 是合格会话中 session 级 startup_time 的 95 分位数，并非 AVG(startup_time)*0.95，也不能用各区域/各小时 P95 求平均得到全局 P95，应由会话级观测或可合并的 percentile sketch 计算 [knowledge:media-qoe-metrics::03-startup-time-and-startup-time-p95]。\n\n启动延迟升高排查清单（SOP）[knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop]：\n1. 在匹配的基线/当前窗口对比平均与 P95 首帧耗时，并同时观察播放成功率与会话量。\n2. 按 schema 中实际存在的 region、CDN、device 维度下钻；schema 未暴露的 OS、播放器版本、协议、内容类型不要请求。\n3. 在各自归属系统中核查：DNS/连接/TLS、清单（manifest）与首段延迟、CDN 缓存未命中、上游延迟、播放器初始化、解码就绪。\n4. 按时间与范围关联告警及发布/流量切换事件（如 E302 等，作为可能原因的佐证）。\n\n【INFERENCE】首帧耗时同时受网络、CDN、源站、播放器与解码链路影响，聚合指标升高只能定位症状，本身无法区分具体原因，因此必须结合下钻维度、链路分段指标与告警/变更事件交叉印证 [knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop]。指标口径与 P95 计算规则按上段说明。\n\n【LIMITATION】未查询数据库，无基线/当前窗口数值、无 region/CDN/device 下钻结果、无成功率与会话量、无链路分段耗时与告警记录，故无法给出具体异常维度或幅度；告警事件与首帧耗时升高之间仅为时间/范围关联，缺少因果证据；文档未提供各分段指标的阈值与归属系统清单；失败会话是否被排除也会影响结论（以成功启动为条件可能掩盖严重事故）[knowledge:media-qoe-metrics::03-startup-time-and-startup-time-p95]。",
+        "memory_updated": true,
+        "trace_summary": {
+          "trace_id": "4356100f-0542-45a9-872d-39ccc016c5d9",
+          "total_duration_ms": 9719.26,
+          "planner_duration_ms": 1986.4112999057397,
+          "sql_agent_duration_ms": null,
+          "reviewer_duration_ms": null,
+          "analyst_duration_ms": null,
+          "final_answer_duration_ms": 4768.173199961893,
+          "sql_query_count": 0,
+          "review_count": 0,
+          "technical_retry_count": 0,
+          "semantic_retry_count": 0,
+          "follow_up_resolution_count": 0,
+          "task_count": 1,
+          "completed_task_count": 1,
+          "failed_task_count": 0,
+          "success": true,
+          "llm_call_count": null,
+          "token_usage": null
+        },
+        "llm": {
+          "calls": 3,
+          "by_component": {
+            "final_answer": 1,
+            "other": 1,
+            "planner": 1
+          },
+          "total_latency_ms": 9674.240099964663
+        },
+        "wall_latency_ms": 9717.583600082435
+      },
+      "verified_llm_by_component": {
+        "planner": 1,
+        "final_answer": 1,
+        "session_memory": 1
+      },
+      "structured_output_retries": {},
+      "fact_audit": "Pass for knowledge-only advice. No SQL facts claimed.",
+      "instrumentation_note": "The old classifier labeled session extraction as 'other'."
+    },
+    {
+      "id": "B-pro-reviewer-failed",
+      "raw_result": {
+        "case": "b",
+        "query": "华南地区播放成功率下降，并出现 E302 告警，应该怎么排查？",
+        "success": false,
+        "error": "AnalystError: source_contract failed for task t4: ambiguous metric columns / source result contract mismatch for source t1: ['session_count', 'successful_sessions', 'failed_sessions', 'playback_success_rate']",
+        "tasks": [
+          {
+            "task_id": "t1",
+            "description": "Query stream_sessions filtered to region='华南' and window_name in ('current_window','previous_window'), grouped by window_name, returning session_count, successful_sessions, failed_sessions and playback_success_rate to quantify the overall success-rate change and attempt volume.",
+            "task_type": "query",
+            "depends_on": [],
+            "status": "completed"
+          },
+          {
+            "task_id": "t2",
+            "description": "Query stream_sessions filtered to region='华南' and window_name in ('current_window','previous_window'), grouped by cdn and window_name, returning session_count, successful_sessions, failed_sessions and playback_success_rate to localize the decline to a CDN provider.",
+            "task_type": "query",
+            "depends_on": [],
+            "status": "completed"
+          },
+          {
+            "task_id": "t3",
+            "description": "Query alarm_events filtered to region='华南' and error_code='E302' with window_name in ('current_window','previous_window'), grouped by window_name, cdn, severity and status, returning alarm counts as independent evidence aligned to the same comparison windows as stream_sessions.",
+            "task_type": "query",
+            "depends_on": [],
+            "status": "completed"
+          },
+          {
+            "task_id": "t4",
+            "description": "Same-metric grouped comparison: recompute success rate from summed successful_sessions and session_count rather than averaging ratios, compute the window-over-window change and failed_sessions delta for 华南 overall and per cdn, and rank CDNs by weighted contribution to the degradation.",
+            "task_type": "analysis",
+            "depends_on": [
+              "t1",
+              "t2"
+            ],
+            "status": "failed"
+          },
+          {
+            "task_id": "t5",
+            "description": "Correlate the CDN-level success-rate degradation from t4 with the E302 alarm counts and severity distribution from t3 across the same windows and regions, stating whether alarm overlap is temporally consistent with the decline and treating it as possible cause rather than proof of causality.",
+            "task_type": "analysis",
+            "depends_on": [
+              "t1",
+              "t2",
+              "t3",
+              "t4"
+            ],
+            "status": "pending"
+          },
+          {
+            "task_id": "t6",
+            "description": "Deliver a Chinese troubleshooting plan grounded in t4 and t5: confirm the measured 华南 success-rate change and attempt volume, name the largest-contributing CDN, cross-reference E302 alarm start/end timing and affected CDN/region, then list checks for CDN upstream timeout triggers and a comparison of unaffected CDNs as validation.",
+            "task_type": "response",
+            "depends_on": [
+              "t4",
+              "t5"
+            ],
+            "status": "pending"
+          }
+        ],
+        "retrieval": {
+          "calls": 1,
+          "latency_ms": 3.9135999977588654,
+          "chunk_ids": [
+            "media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+            "media-error-codes::01-e302-cdn-upstream-timeout",
+            "media-qoe-metrics::01-playback-success-rate",
+            "media-qoe-metrics::04-failed-session-count",
+            "media-troubleshooting-sop::02-startup-latency-increase-sop"
+          ]
+        },
+        "sql_results": [
+          {
+            "task_id": "t1",
+            "sql": "SELECT window_name, COUNT(*) AS session_count, SUM(CASE WHEN play_success THEN 1 ELSE 0 END) AS successful_sessions, SUM(CASE WHEN play_success THEN 0 ELSE 1 END) AS failed_sessions, AVG(CASE WHEN play_success THEN 1.0 ELSE 0.0 END) AS playback_success_rate FROM stream_sessions WHERE region = '华南' AND window_name IN ('current_window', 'previous_window') GROUP BY window_name ORDER BY window_name",
+            "success": true,
+            "columns": [
+              "window_name",
+              "session_count",
+              "successful_sessions",
+              "failed_sessions",
+              "playback_success_rate"
+            ],
+            "rows": [
+              {
+                "window_name": "current_window",
+                "session_count": 60,
+                "successful_sessions": "43",
+                "failed_sessions": "17",
+                "playback_success_rate": 0.7166666666666667
+              },
+              {
+                "window_name": "previous_window",
+                "session_count": 60,
+                "successful_sessions": "56",
+                "failed_sessions": "4",
+                "playback_success_rate": 0.9333333333333333
+              }
+            ],
+            "row_count": 2,
+            "error": null,
+            "retry_count": 0,
+            "semantic_retry_count": 0,
+            "execution_time": 1.729167699930258,
+            "context_summary": "{\"strategy\":\"full\",\"schema\":\"Catalog: wren, Schema: public\\n\\n### Model: alarm_events — One row per synthetic operational alarm. Alarm timestamps share the same comparison windows as stream_sessions. E302 means a CDN upstream request timeout in this fixture. Temporal correlation is evidence of a possible cause, not proof of causality.\\n  Primary key: alarm_id\\n  Columns:\\n    - alarm_id (VARCHAR) — Unique alarm event identifier. NOT NULL PRIMARY KEY\\n    - timestamp (TIMESTAMP) — Time when th..."
+          },
+          {
+            "task_id": "t2",
+            "sql": "SELECT\n  cdn,\n  window_name,\n  COUNT(*) AS session_count,\n  SUM(CASE WHEN play_success THEN 1 ELSE 0 END) AS successful_sessions,\n  SUM(CASE WHEN play_success THEN 0 ELSE 1 END) AS failed_sessions,\n  AVG(CASE WHEN play_success THEN 1.0 ELSE 0.0 END) AS playback_success_rate\nFROM stream_sessions\nWHERE region = '华南'\n  AND window_name IN ('current_window', 'previous_window')\nGROUP BY cdn, window_name\nORDER BY cdn, window_name;",
+            "success": true,
+            "columns": [
+              "cdn",
+              "window_name",
+              "session_count",
+              "successful_sessions",
+              "failed_sessions",
+              "playback_success_rate"
+            ],
+            "rows": [
+              {
+                "cdn": "CDN-A",
+                "window_name": "current_window",
+                "session_count": 20,
+                "successful_sessions": "17",
+                "failed_sessions": "3",
+                "playback_success_rate": 0.85
+              },
+              {
+                "cdn": "CDN-A",
+                "window_name": "previous_window",
+                "session_count": 20,
+                "successful_sessions": "19",
+                "failed_sessions": "1",
+                "playback_success_rate": 0.95
+              },
+              {
+                "cdn": "CDN-B",
+                "window_name": "current_window",
+                "session_count": 20,
+                "successful_sessions": "10",
+                "failed_sessions": "10",
+                "playback_success_rate": 0.5
+              },
+              {
+                "cdn": "CDN-B",
+                "window_name": "previous_window",
+                "session_count": 20,
+                "successful_sessions": "19",
+                "failed_sessions": "1",
+                "playback_success_rate": 0.95
+              },
+              {
+                "cdn": "CDN-C",
+                "window_name": "current_window",
+                "session_count": 20,
+                "successful_sessions": "16",
+                "failed_sessions": "4",
+                "playback_success_rate": 0.8
+              },
+              {
+                "cdn": "CDN-C",
+                "window_name": "previous_window",
+                "session_count": 20,
+                "successful_sessions": "18",
+                "failed_sessions": "2",
+                "playback_success_rate": 0.9
+              }
+            ],
+            "row_count": 6,
+            "error": null,
+            "retry_count": 0,
+            "semantic_retry_count": 0,
+            "execution_time": 1.7646485000150278,
+            "context_summary": "{\"strategy\":\"full\",\"schema\":\"Catalog: wren, Schema: public\\n\\n### Model: alarm_events — One row per synthetic operational alarm. Alarm timestamps share the same comparison windows as stream_sessions. E302 means a CDN upstream request timeout in this fixture. Temporal correlation is evidence of a possible cause, not proof of causality.\\n  Primary key: alarm_id\\n  Columns:\\n    - alarm_id (VARCHAR) — Unique alarm event identifier. NOT NULL PRIMARY KEY\\n    - timestamp (TIMESTAMP) — Time when th..."
+          },
+          {
+            "task_id": "t3",
+            "sql": "SELECT window_name, cdn, severity, status, COUNT(*) AS alarm_count FROM alarm_events WHERE region = '华南' AND error_code = 'E302' AND window_name IN ('current_window', 'previous_window') GROUP BY window_name, cdn, severity, status ORDER BY window_name, cdn, severity, status",
+            "success": true,
+            "columns": [
+              "window_name",
+              "cdn",
+              "severity",
+              "status",
+              "alarm_count"
+            ],
+            "rows": [
+              {
+                "window_name": "current_window",
+                "cdn": "CDN-B",
+                "severity": "high",
+                "status": "investigating",
+                "alarm_count": 1
+              },
+              {
+                "window_name": "current_window",
+                "cdn": "CDN-B",
+                "severity": "high",
+                "status": "open",
+                "alarm_count": 1
+              },
+              {
+                "window_name": "current_window",
+                "cdn": "CDN-B",
+                "severity": "high",
+                "status": "resolved",
+                "alarm_count": 1
+              }
+            ],
+            "row_count": 3,
+            "error": null,
+            "retry_count": 0,
+            "semantic_retry_count": 0,
+            "execution_time": 1.2160929000237957,
+            "context_summary": "{\"strategy\":\"full\",\"schema\":\"Catalog: wren, Schema: public\\n\\n### Model: alarm_events — One row per synthetic operational alarm. Alarm timestamps share the same comparison windows as stream_sessions. E302 means a CDN upstream request timeout in this fixture. Temporal correlation is evidence of a possible cause, not proof of causality.\\n  Primary key: alarm_id\\n  Columns:\\n    - alarm_id (VARCHAR) — Unique alarm event identifier. NOT NULL PRIMARY KEY\\n    - timestamp (TIMESTAMP) — Time when th..."
+          }
+        ],
+        "reviewer_results": [
+          {
+            "task_id": "t1",
+            "decision": "approve",
+            "reason_summary": "SQL and result match the t1 contract: filtered to 华南 and both comparison windows, grouped by window_name, and returned session_count, successful_sessions, failed_sessions, and playback_success_rate for both windows.",
+            "issues": [],
+            "retry_instruction": null,
+            "confidence": 0.98,
+            "review_retry_count": 0
+          },
+          {
+            "task_id": "t2",
+            "decision": "approve",
+            "reason_summary": "SQL matches t2 scope: filters region 华南 and comparison windows, groups by cdn/window, and returns required session counts, successful/failed sessions, and success rate. Result supports CDN-level localization.",
+            "issues": [],
+            "retry_instruction": null,
+            "confidence": 0.97,
+            "review_retry_count": 0
+          },
+          {
+            "task_id": "t3",
+            "decision": "approve",
+            "reason_summary": "SQL filters to 华南 and E302 in both comparison windows, groups by window, CDN, severity, and status, and returns alarm counts. The result matches the contract and provides the required independent evidence.",
+            "issues": [],
+            "retry_instruction": null,
+            "confidence": 0.97,
+            "review_retry_count": 0
+          }
+        ],
+        "trace_summary": {
+          "trace_id": "ae7bd558-58c8-4ffb-89ae-1278468c9820",
+          "total_duration_ms": 57180.621,
+          "planner_duration_ms": 8772.917700000107,
+          "sql_agent_duration_ms": 4709.909099969082,
+          "reviewer_duration_ms": 43646.330600138754,
+          "analyst_duration_ms": 0.1039999770000577,
+          "final_answer_duration_ms": null,
+          "sql_query_count": 3,
+          "review_count": 3,
+          "technical_retry_count": 0,
+          "semantic_retry_count": 0,
+          "follow_up_resolution_count": 0,
+          "task_count": 6,
+          "completed_task_count": 3,
+          "failed_task_count": 1,
+          "success": false,
+          "llm_call_count": null,
+          "token_usage": null
+        },
+        "structured_output_retries": {
+          "PLANNER_RETRY": 0,
+          "REVIEW_OUTPUT_RETRY": 0,
+          "ANALYST_OUTPUT_RETRY": 0
+        },
+        "llm": {
+          "model": "deepseek-v4-flash",
+          "reviewer_model": "deepseek-v4-pro",
+          "calls": 7,
+          "by_component": {
+            "planner": 1,
+            "reviewer": 3,
+            "sql_agent": 3
+          }
+        },
+        "wall_latency_ms": 57176.646600011736
+      },
+      "fact_audit": "No final answer emitted; three approved queries followed by Analyst source-contract rejection of incompatible two-query inputs."
+    },
+    {
+      "id": "B-pro-planner-pro-reviewer",
+      "raw_result": {
+        "case": "b",
+        "query": "华南地区播放成功率下降，并出现 E302 告警，应该怎么排查？",
+        "success": true,
+        "tasks": [
+          {
+            "task_id": "q1_south_china_success_by_window_cdn",
+            "description": "Query hourly_alarm_correlation for region = '华南'. Return window_name, cdn, session_count, successful_sessions, and playback_success_rate for window_name values 'current_window', 'previous_window', 'previous_day', and 'prior_year'. This provides the playback success comparison by window and CDN.",
+            "task_type": "query",
+            "depends_on": [],
+            "status": "completed"
+          },
+          {
+            "task_id": "q2_e302_alarm_evidence",
+            "description": "Query alarm_events for region = '华南' and error_code = 'E302'. Return window_name, cdn, severity, status, and count of alarm events as e302_alarm_count, grouped by window_name and cdn. This is the independent E302 alarm evidence input.",
+            "task_type": "query",
+            "depends_on": [],
+            "status": "completed"
+          },
+          {
+            "task_id": "q3_device_breakdown_south_china",
+            "description": "Query stream_sessions for region = '华南'. Return window_name, device, count of sessions as session_count, count of sessions where play_success = true as successful_sessions, and playback_success_rate for each window_name and device. This provides device-level breakdown of the success rate change.",
+            "task_type": "query",
+            "depends_on": [],
+            "status": "completed"
+          },
+          {
+            "task_id": "a1_correlate_success_and_e302",
+            "description": "Analyze the query results. Compare South China playback success rate for current_window against previous_window, previous_day, and prior_year. Identify CDN(s) with the largest decline and overlap with E302 alarms by window and CDN. Assess device breakdown impact. Determine likely contributing CDN/device and whether E302 timing and severity align with the success drop. Return findings and recommended next investigative steps.",
+            "task_type": "analysis",
+            "depends_on": [
+              "q1_south_china_success_by_window_cdn",
+              "q2_e302_alarm_evidence",
+              "q3_device_breakdown_south_china"
+            ],
+            "status": "completed"
+          },
+          {
+            "task_id": "r1_troubleshooting_answer",
+            "description": "Based on the analysis findings, provide a clear troubleshooting answer in Chinese: confirm whether 华南 playback success rate declined, highlight the most affected CDN and device, describe E302 alarm timing and coverage, and recommend next steps such as checking CDN upstream timeout, origin health, and comparing with healthy CDNs.",
+            "task_type": "response",
+            "depends_on": [
+              "a1_correlate_success_and_e302"
+            ],
+            "status": "completed"
+          }
+        ],
+        "retrieval": {
+          "calls": 1,
+          "latency_ms": 1.871699932962656,
+          "chunk_ids": [
+            "media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+            "media-error-codes::01-e302-cdn-upstream-timeout",
+            "media-qoe-metrics::01-playback-success-rate",
+            "media-qoe-metrics::04-failed-session-count",
+            "media-troubleshooting-sop::02-startup-latency-increase-sop"
+          ]
+        },
+        "sql_results": [
+          {
+            "task_id": "q1_south_china_success_by_window_cdn",
+            "sql": "SELECT window_name, cdn, SUM(session_count) AS session_count, SUM(successful_sessions) AS successful_sessions, CAST(SUM(successful_sessions) AS DOUBLE) / NULLIF(SUM(session_count), 0) AS playback_success_rate FROM hourly_alarm_correlation WHERE region = '华南' AND window_name IN ('current_window', 'previous_window', 'previous_day', 'prior_year') GROUP BY window_name, cdn ORDER BY window_name, cdn",
+            "success": true,
+            "columns": [
+              "window_name",
+              "cdn",
+              "session_count",
+              "successful_sessions",
+              "playback_success_rate"
+            ],
+            "rows": [
+              {
+                "window_name": "current_window",
+                "cdn": "CDN-A",
+                "session_count": "20",
+                "successful_sessions": "17",
+                "playback_success_rate": 0.85
+              },
+              {
+                "window_name": "current_window",
+                "cdn": "CDN-B",
+                "session_count": "20",
+                "successful_sessions": "10",
+                "playback_success_rate": 0.5
+              },
+              {
+                "window_name": "current_window",
+                "cdn": "CDN-C",
+                "session_count": "20",
+                "successful_sessions": "16",
+                "playback_success_rate": 0.8
+              },
+              {
+                "window_name": "previous_day",
+                "cdn": "CDN-A",
+                "session_count": "20",
+                "successful_sessions": "19",
+                "playback_success_rate": 0.95
+              },
+              {
+                "window_name": "previous_day",
+                "cdn": "CDN-B",
+                "session_count": "20",
+                "successful_sessions": "18",
+                "playback_success_rate": 0.9
+              },
+              {
+                "window_name": "previous_day",
+                "cdn": "CDN-C",
+                "session_count": "20",
+                "successful_sessions": "18",
+                "playback_success_rate": 0.9
+              },
+              {
+                "window_name": "previous_window",
+                "cdn": "CDN-A",
+                "session_count": "20",
+                "successful_sessions": "19",
+                "playback_success_rate": 0.95
+              },
+              {
+                "window_name": "previous_window",
+                "cdn": "CDN-B",
+                "session_count": "20",
+                "successful_sessions": "19",
+                "playback_success_rate": 0.95
+              },
+              {
+                "window_name": "previous_window",
+                "cdn": "CDN-C",
+                "session_count": "20",
+                "successful_sessions": "18",
+                "playback_success_rate": 0.9
+              },
+              {
+                "window_name": "prior_year",
+                "cdn": "CDN-A",
+                "session_count": "20",
+                "successful_sessions": "19",
+                "playback_success_rate": 0.95
+              },
+              {
+                "window_name": "prior_year",
+                "cdn": "CDN-B",
+                "session_count": "20",
+                "successful_sessions": "18",
+                "playback_success_rate": 0.9
+              },
+              {
+                "window_name": "prior_year",
+                "cdn": "CDN-C",
+                "session_count": "20",
+                "successful_sessions": "18",
+                "playback_success_rate": 0.9
+              }
+            ],
+            "row_count": 12,
+            "error": null,
+            "retry_count": 0,
+            "semantic_retry_count": 0,
+            "execution_time": 2.2890065000392497,
+            "context_summary": "{\"strategy\":\"full\",\"schema\":\"Catalog: wren, Schema: public\\n\\n### Model: alarm_events — One row per synthetic operational alarm. Alarm timestamps share the same comparison windows as stream_sessions. E302 means a CDN upstream request timeout in this fixture. Temporal correlation is evidence of a possible cause, not proof of causality.\\n  Primary key: alarm_id\\n  Columns:\\n    - alarm_id (VARCHAR) — Unique alarm event identifier. NOT NULL PRIMARY KEY\\n    - timestamp (TIMESTAMP) — Time when th..."
+          },
+          {
+            "task_id": "q2_e302_alarm_evidence",
+            "sql": "SELECT\n  window_name,\n  cdn,\n  MAX(severity) AS severity,\n  MAX(status) AS status,\n  COUNT(*) AS e302_alarm_count\nFROM alarm_events\nWHERE region = '华南'\n  AND error_code = 'E302'\nGROUP BY window_name, cdn",
+            "success": true,
+            "columns": [
+              "window_name",
+              "cdn",
+              "severity",
+              "status",
+              "e302_alarm_count"
+            ],
+            "rows": [
+              {
+                "window_name": "current_window",
+                "cdn": "CDN-B",
+                "severity": "high",
+                "status": "resolved",
+                "e302_alarm_count": 3
+              }
+            ],
+            "row_count": 1,
+            "error": null,
+            "retry_count": 0,
+            "semantic_retry_count": 0,
+            "execution_time": 2.2618480999954045,
+            "context_summary": "{\"strategy\":\"full\",\"schema\":\"Catalog: wren, Schema: public\\n\\n### Model: alarm_events — One row per synthetic operational alarm. Alarm timestamps share the same comparison windows as stream_sessions. E302 means a CDN upstream request timeout in this fixture. Temporal correlation is evidence of a possible cause, not proof of causality.\\n  Primary key: alarm_id\\n  Columns:\\n    - alarm_id (VARCHAR) — Unique alarm event identifier. NOT NULL PRIMARY KEY\\n    - timestamp (TIMESTAMP) — Time when th..."
+          },
+          {
+            "task_id": "q3_device_breakdown_south_china",
+            "sql": "SELECT window_name, device, COUNT(*) AS session_count, SUM(CASE WHEN play_success THEN 1 ELSE 0 END) AS successful_sessions, AVG(CASE WHEN play_success THEN 1.0 ELSE 0.0 END) AS playback_success_rate FROM stream_sessions WHERE region = '华南' GROUP BY window_name, device ORDER BY window_name, device",
+            "success": true,
+            "columns": [
+              "window_name",
+              "device",
+              "session_count",
+              "successful_sessions",
+              "playback_success_rate"
+            ],
+            "rows": [
+              {
+                "window_name": "current_window",
+                "device": "mobile",
+                "session_count": 18,
+                "successful_sessions": "13",
+                "playback_success_rate": 0.7222222222222222
+              },
+              {
+                "window_name": "current_window",
+                "device": "tv",
+                "session_count": 21,
+                "successful_sessions": "14",
+                "playback_success_rate": 0.6666666666666666
+              },
+              {
+                "window_name": "current_window",
+                "device": "web",
+                "session_count": 21,
+                "successful_sessions": "16",
+                "playback_success_rate": 0.7619047619047619
+              },
+              {
+                "window_name": "previous_day",
+                "device": "mobile",
+                "session_count": 18,
+                "successful_sessions": "18",
+                "playback_success_rate": 1
+              },
+              {
+                "window_name": "previous_day",
+                "device": "tv",
+                "session_count": 21,
+                "successful_sessions": "18",
+                "playback_success_rate": 0.8571428571428571
+              },
+              {
+                "window_name": "previous_day",
+                "device": "web",
+                "session_count": 21,
+                "successful_sessions": "19",
+                "playback_success_rate": 0.9047619047619048
+              },
+              {
+                "window_name": "previous_window",
+                "device": "mobile",
+                "session_count": 18,
+                "successful_sessions": "18",
+                "playback_success_rate": 1
+              },
+              {
+                "window_name": "previous_window",
+                "device": "tv",
+                "session_count": 21,
+                "successful_sessions": "18",
+                "playback_success_rate": 0.8571428571428571
+              },
+              {
+                "window_name": "previous_window",
+                "device": "web",
+                "session_count": 21,
+                "successful_sessions": "20",
+                "playback_success_rate": 0.9523809523809523
+              },
+              {
+                "window_name": "prior_year",
+                "device": "mobile",
+                "session_count": 18,
+                "successful_sessions": "18",
+                "playback_success_rate": 1
+              },
+              {
+                "window_name": "prior_year",
+                "device": "tv",
+                "session_count": 21,
+                "successful_sessions": "18",
+                "playback_success_rate": 0.8571428571428571
+              },
+              {
+                "window_name": "prior_year",
+                "device": "web",
+                "session_count": 21,
+                "successful_sessions": "19",
+                "playback_success_rate": 0.9047619047619048
+              }
+            ],
+            "row_count": 12,
+            "error": null,
+            "retry_count": 0,
+            "semantic_retry_count": 0,
+            "execution_time": 1.5900140999583527,
+            "context_summary": "{\"strategy\":\"full\",\"schema\":\"Catalog: wren, Schema: public\\n\\n### Model: alarm_events — One row per synthetic operational alarm. Alarm timestamps share the same comparison windows as stream_sessions. E302 means a CDN upstream request timeout in this fixture. Temporal correlation is evidence of a possible cause, not proof of causality.\\n  Primary key: alarm_id\\n  Columns:\\n    - alarm_id (VARCHAR) — Unique alarm event identifier. NOT NULL PRIMARY KEY\\n    - timestamp (TIMESTAMP) — Time when th..."
+          }
+        ],
+        "reviewer_results": [
+          {
+            "task_id": "q1_south_china_success_by_window_cdn",
+            "decision": "approve",
+            "reason_summary": "SQL returns the required window_name, cdn, session_count, successful_sessions, and computed playback_success_rate for the specified region and four comparison windows, matching the current task contract.",
+            "issues": [],
+            "retry_instruction": null,
+            "confidence": 0.95,
+            "review_retry_count": 0
+          },
+          {
+            "task_id": "q2_e302_alarm_evidence",
+            "decision": "approve",
+            "reason_summary": "SQL correctly filters region='华南' and error_code='E302', groups by window_name and cdn, and returns required columns including count. Result contains E302 alarm evidence.",
+            "issues": [],
+            "retry_instruction": null,
+            "confidence": 0.95,
+            "review_retry_count": 0
+          },
+          {
+            "task_id": "q3_device_breakdown_south_china",
+            "decision": "approve",
+            "reason_summary": "SQL correctly filters region='华南', groups by window_name and device, and computes session_count, successful_sessions, and playback_success_rate. Result has 12 rows covering the device-level breakdown.",
+            "issues": [],
+            "retry_instruction": null,
+            "confidence": 0.95,
+            "review_retry_count": 0
+          }
+        ],
+        "analysis_results": [
+          {
+            "task_id": "a1_correlate_success_and_e302",
+            "summary": "DATA EVIDENCE (q1) shows South China playback success rate fell from 0.9333 in previous_window (56/60) to 0.7167 in current_window (43/60), i.e. -21.7 pp, versus 0.9167 in previous_day and 0.9167 in prior_year. CDN-B accounts for the largest drop (0.95→0.50), contributing 9 of the 13 additional failed sessions. q2 shows E302 alarms only in current_window on CDN-B (3 alarms, severity high, status resolved). Device breakdown (q3) shows all devices declining. Reconciliation is uncertain and no causal link is proven.",
+            "findings": [
+              "DATA EVIDENCE (q1): Current-window South China rates by CDN — CDN-A 17/20 = 0.85, CDN-B 10/20 = 0.50, CDN-C 16/20 = 0.80; aggregate 43/60 = 0.7167.",
+              "DATA EVIDENCE (q1): Baselines — previous_window 56/60 = 0.9333 (A 0.95, B 0.95, C 0.90); previous_day 55/60 = 0.9167 (A 0.95, B 0.90, C 0.90); prior_year 55/60 = 0.9167 (A 0.95, B 0.90, C 0.90).",
+              "DATA EVIDENCE (q1): Largest decline is CDN-B, -0.45 (0.95→0.50; failures 1→10, +9 sessions), versus CDN-A -0.10 (1→3) and CDN-C -0.10 (2→4). CDN-B explains 9 of the 13 added failures between previous_window and current_window.",
+              "DATA EVIDENCE (q2): The only E302 group is current_window / CDN-B — 3 alarms, severity high, status resolved. No E302 rows exist for CDN-A or CDN-C, nor for baseline windows.",
+              "DATA EVIDENCE (q2/q1 overlap): E302 alarms and the largest success-rate decline coincide on the same CDN (CDN-B) and the same window (current_window).",
+              "DATA EVIDENCE (q3): Device rates in current_window — mobile 13/18 = 0.7222, tv 14/21 = 0.6667, web 16/21 = 0.7619; previous_window was mobile 1.0 (18/18), tv 0.8571 (18/21), web 0.9524 (20/21). Declines are broad: mobile -27.8 pp, tv -19.0 pp, web -19.0 pp.",
+              "DATA EVIDENCE: Per-CDN and per-device sample sizes are small (20 sessions per CDN per window; 18–21 per device per window), so rate differences carry wide uncertainty.",
+              "KNOWLEDGE EVIDENCE (Playback Success Rate, qoe_metrics): the metric is SUM(successful)/SUM(total); ratios must be recomputed from counts, not averaged. A falling rate identifies an outcome, not a root cause.",
+              "KNOWLEDGE EVIDENCE (E302, error_codes): E302 means a CDN edge/intermediate node timed out awaiting an upstream response; common triggers include origin overload, unhealthy origin route, packet loss to origin, too-short upstream timeout, and slow object generation. E302 alone does not prove a root cause.",
+              "KNOWLEDGE EVIDENCE (CDN Degradation SOP): step 4 directs E302 investigation to upstream latency, timeout rate, origin health, and routing; step 5 directs comparison against unaffected CDNs plus deploy/traffic-shift/origin events. Step 3 recommends denominator-aware (failed-session) contribution ranking, which points to CDN-B.",
+              "INFERENCE: The evidence is consistent with an upstream-timeout problem localized to CDN-B in the current window, with E302 timing/scope aligning with the steepest success-rate drop; however temporal overlap is correlation, and without request traces, origin telemetry, or routing data, causality is unproven.",
+              "INFERENCE: Because the device breakdown degrades across mobile, tv, and web simultaneously, a device-specific fault is unlikely to be the primary driver; the pattern is more consistent with a shared CDN/upstream path affecting all clients.",
+              "RECOMMENDED NEXT STEP: Pull CDN-B upstream latency, timeout rate, origin health, and routing state for the current window, and check for deploy or traffic-shift events on CDN-B; compare against healthy CDN-A/CDN-C in South China.",
+              "RECOMMENDED NEXT STEP: Re-run the comparison with larger samples and with per-session timestamps to test whether E302 alarm times precede the failed sessions, and cross-check CDN-by-device cells if the schema exposes that dimension."
+            ],
+            "derived_values": {},
+            "source_task_ids": [
+              "q1_south_china_success_by_window_cdn",
+              "q2_e302_alarm_evidence",
+              "q3_device_breakdown_south_china"
+            ],
+            "success": true,
+            "error": null,
+            "retry_count": 0
+          }
+        ],
+        "final_answer": "【DATA EVIDENCE（已完成分析 a1_correlate_success_and_e302）】\n1) 确认下降：华南播放成功率从上一窗口 0.9333（56/60）降至当前窗口 0.7167（43/60），下降约 21.7 个百分点；对比前一日 0.9167、去年同期 0.9167。\n2) 最受影响 CDN：CDN-B 从 0.95 降至 0.50（失败 1→10，增加 9 个失败会话），是上一窗口到当前窗口新增 13 个失败中的 9 个；CDN-A 0.95→0.85（-0.10），CDN-C 0.90→0.80（-0.10）。当前窗口：A 17/20=0.85、B 10/20=0.50、C 16/20=0.80。\n3) 设备维度：当前窗口 mobile 13/18=0.7222、tv 14/21=0.6667、web 16/21=0.7619；上一窗口为 mobile 1.0、tv 0.8571、web 0.9524，即 mobile -27.8pp、tv -19.0pp、web -19.0pp，三类设备全面下降。\n4) E302 告警时间与覆盖：仅出现在当前窗口、CDN-B，共 3 条、severity=high、status=resolved；CDN-A、CDN-C 及所有基线窗口均无 E302。E302 与最大成功率跌幅落在同一 CDN、同一窗口。\n\n【KNOWLEDGE EVIDENCE】\n播放成功率口径为 SUM(successful)/SUM(total)，必须用分子分母重算，不能对已聚合比率取平均；成功率下降只是结果，不是根因 [knowledge:media-qoe-metrics::01-playback-success-rate]。E302 表示 CDN 边缘/中间节点等待上游响应超时，常见诱因包括源站过载、源站路由异常、CDN 到源站丢包、上游超时设置过短、对象生成缓慢；E302 本身不能证明根因，时间重叠也不等于告警导致 QoE 下降 [knowledge:media-error-codes::01-e302-cdn-upstream-timeout]。SOP 第 4 步要求针对 E302 检查上游时延、超时率、源站健康与路由；第 5 步要求在区域内与未受影响 CDN 对比，并核查发布、流量切换、源站事件 [knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop]。失败会话数应按分母口径比较贡献 [knowledge:media-qoe-metrics::04-failed-session-count]。\n\n【INFERENCE】证据与“当前窗口 CDN-B 上游超时”这一方向一致：E302 的时间与范围同最陡的成功率下滑重合，设备侧 mobile/tv/web 同步变差，更像共享 CDN/上游链路问题，而非单一设备故障。但这只是相关性，未获因果证明。\n\n【建议排查步骤】\n1) 拉取当前窗口 CDN-B 的上游时延、超时率、源站健康度与路由状态，核查是否有发布或流量切换事件。\n2) 以 CDN-A、CDN-C 为健康对照组，在同一区域、同一窗口做对比，确认差异是否只集中在 CDN-B。\n3) 用逐会话时间戳验证 E302 告警时间是否先于失败会话，并用更大样本复跑以缩小抽样不确定性。\n\n【LIMITATION】仅查询到当前窗口 CDN-B 的 E302；无请求链路追踪、源站遥测、路由数据或受控验证，因此“E302 导致成功率下降”不可判定为因果。每个 CDN 每窗口仅 20 个会话、每设备 18–21 个，比率不确定性大。本次回答基于分析结果与检索文档，未额外执行数据库查询。",
+        "memory_updated": true,
+        "trace_summary": {
+          "trace_id": "f71abf81-88ea-4b11-b84b-e7d6d7d87d2f",
+          "total_duration_ms": 110061.001,
+          "planner_duration_ms": 55016.66279998608,
+          "sql_agent_duration_ms": 6140.868699993007,
+          "reviewer_duration_ms": 28740.113099920563,
+          "analyst_duration_ms": 6892.457799986005,
+          "final_answer_duration_ms": 5853.347699972801,
+          "sql_query_count": 3,
+          "review_count": 3,
+          "technical_retry_count": 0,
+          "semantic_retry_count": 0,
+          "follow_up_resolution_count": 0,
+          "task_count": 5,
+          "completed_task_count": 5,
+          "failed_task_count": 0,
+          "success": true,
+          "llm_call_count": null,
+          "token_usage": null
+        },
+        "structured_output_retries": {
+          "PLANNER_RETRY": 0,
+          "REVIEW_OUTPUT_RETRY": 0,
+          "ANALYST_OUTPUT_RETRY": 0
+        },
+        "llm": {
+          "model": "deepseek-v4-flash",
+          "planner_model": "deepseek-v4-pro",
+          "reviewer_model": "deepseek-v4-pro",
+          "calls": 10,
+          "by_component": {
+            "analyst": 1,
+            "final_answer": 1,
+            "planner": 1,
+            "reviewer": 3,
+            "session_memory": 1,
+            "sql_agent": 3
+          },
+          "total_latency_ms": 109747.11669993121
+        },
+        "wall_latency_ms": 110058.39349993039
+      },
+      "fact_audit": "FAILED despite successful workflow. MAX(status) collapsed distinct alarm lifecycle states; final answer presents the aggregate 'resolved' as the state of three alarms. CDN-A and CDN-C are described as healthy controls although their success rates also declined."
+    }
+  ],
+  "local_read_only_audit": {
+    "qoe": [
+      {
+        "window_name": "current_window",
+        "cdn": "CDN-A",
+        "session_count": 20,
+        "successful_sessions": "17",
+        "playback_success_rate": 0.85,
+        "high_severity_alarm_count": "0",
+        "representative_high_error_code": null
+      },
+      {
+        "window_name": "current_window",
+        "cdn": "CDN-B",
+        "session_count": 20,
+        "successful_sessions": "10",
+        "playback_success_rate": 0.5,
+        "high_severity_alarm_count": "3",
+        "representative_high_error_code": "E302"
+      },
+      {
+        "window_name": "current_window",
+        "cdn": "CDN-C",
+        "session_count": 20,
+        "successful_sessions": "16",
+        "playback_success_rate": 0.8,
+        "high_severity_alarm_count": "0",
+        "representative_high_error_code": null
+      },
+      {
+        "window_name": "previous_window",
+        "cdn": "CDN-A",
+        "session_count": 20,
+        "successful_sessions": "19",
+        "playback_success_rate": 0.95,
+        "high_severity_alarm_count": "0",
+        "representative_high_error_code": null
+      },
+      {
+        "window_name": "previous_window",
+        "cdn": "CDN-B",
+        "session_count": 20,
+        "successful_sessions": "19",
+        "playback_success_rate": 0.95,
+        "high_severity_alarm_count": "0",
+        "representative_high_error_code": null
+      },
+      {
+        "window_name": "previous_window",
+        "cdn": "CDN-C",
+        "session_count": 20,
+        "successful_sessions": "18",
+        "playback_success_rate": 0.9,
+        "high_severity_alarm_count": "0",
+        "representative_high_error_code": null
+      }
+    ],
+    "alarm_status": [
+      {
+        "window_name": "current_window",
+        "cdn": "CDN-B",
+        "error_code": "E302",
+        "severity": "high",
+        "status": "investigating",
+        "alarm_count": 1
+      },
+      {
+        "window_name": "current_window",
+        "cdn": "CDN-B",
+        "error_code": "E302",
+        "severity": "high",
+        "status": "open",
+        "alarm_count": 1
+      },
+      {
+        "window_name": "current_window",
+        "cdn": "CDN-B",
+        "error_code": "E302",
+        "severity": "high",
+        "status": "resolved",
+        "alarm_count": 1
+      }
+    ],
+    "note": "These two independent verification SQL queries are not included in Agent SQL execution counts."
+  },
+  "totals": {
+    "real_llm_calls": 28,
+    "agent_retrieval_calls": 5,
+    "agent_sql_executions": 7,
+    "local_audit_sql_executions": 2,
+    "valid_reviewer_approvals": 6,
+    "sql_technical_retries": 0,
+    "sql_semantic_retries": 0,
+    "known_structured_output_retries": 2,
+    "case_b_full_replays": 2
+  },
+  "acceptance": {
+    "case_a": true,
+    "case_b": false,
+    "case_c": true,
+    "full_workflow_completed_cases": 3,
+    "factual_acceptance_cases": 2,
+    "reviewer_and_session_memory_core_unchanged": true,
+    "commit_created": false
+  }
+}

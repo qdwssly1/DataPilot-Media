@@ -54,6 +54,9 @@ class TaskItem:
     task_type: TaskType = "analysis"
     depends_on: list[str] = field(default_factory=list)
     status: TaskStatus = "pending"
+    metric_binding: dict[str, Any] = field(default_factory=dict)
+    requested_dimensions: list[str] = field(default_factory=list)
+    window_role_binding: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -66,7 +69,7 @@ class BusinessContext:
 
 @dataclass(slots=True)
 class SQLResult:
-    """Bounded, structured result produced by the SQL Agent."""
+    """Bounded query evidence produced by SQL or an approved read-only tool."""
 
     task_id: str
     sql: str
@@ -79,6 +82,10 @@ class SQLResult:
     semantic_retry_count: int = 0
     execution_time: float = 0.0
     context_summary: str = ""
+    execution_source: Literal["sql", "tool"] = "sql"
+    tool_name: str | None = None
+    tool_input: dict[str, Any] = field(default_factory=dict)
+    tool_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -127,6 +134,11 @@ class FinalAnswerResult:
     success: bool = True
     error: str | None = None
     retry_count: int = 0
+    evidence_pack: dict[str, Any] = field(default_factory=dict)
+    evidence_projection: dict[str, Any] = field(default_factory=dict)
+    evidence_projection_stats: dict[str, Any] = field(default_factory=dict)
+    claims: list[dict[str, Any]] = field(default_factory=list)
+    validator_result: dict[str, Any] = field(default_factory=dict)
 
 
 # Phase 4 exposed this name; keep it as a compatibility alias.
@@ -197,6 +209,12 @@ class AgentState(TypedDict):
     pending_tasks: list[TaskItem]
     relevant_tables: list[str]
     business_context: BusinessContext
+    knowledge_evidence: list[dict[str, Any]]
+    knowledge_retrieval_error: str | None
+    knowledge_retrieval_latency_ms: float
+    tool_routes: list[dict[str, Any]]
+    tool_results: list[dict[str, Any]]
+    tool_fallback_count: int
     generated_sql: list[str]
     sql_results: list[SQLResult]
     retry_count: int
@@ -205,6 +223,11 @@ class AgentState(TypedDict):
     analysis_results: list[AnalysisResult]
     final_answer: str | None
     final_answer_result: FinalAnswerResult | None
+    final_evidence_pack: dict[str, Any]
+    final_evidence_projection: dict[str, Any]
+    final_evidence_projection_stats: dict[str, Any]
+    final_claims: list[dict[str, Any]]
+    final_validator_result: dict[str, Any]
     session_context: SessionContext
     trace_id: str
 
@@ -248,6 +271,12 @@ def create_initial_state(
         pending_tasks=[],
         relevant_tables=[],
         business_context=BusinessContext(),
+        knowledge_evidence=[],
+        knowledge_retrieval_error=None,
+        knowledge_retrieval_latency_ms=0.0,
+        tool_routes=[],
+        tool_results=[],
+        tool_fallback_count=0,
         generated_sql=[],
         sql_results=[],
         retry_count=0,
@@ -256,6 +285,11 @@ def create_initial_state(
         analysis_results=[],
         final_answer=None,
         final_answer_result=None,
+        final_evidence_pack={},
+        final_evidence_projection={},
+        final_evidence_projection_stats={},
+        final_claims=[],
+        final_validator_result={},
         session_context=session_context,
         trace_id=trace_id or str(uuid4()),
     )

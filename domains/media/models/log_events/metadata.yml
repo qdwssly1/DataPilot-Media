@@ -1,0 +1,68 @@
+name: log_events
+properties:
+  description: >-
+    Deterministic structured Media service logs aligned to the QoE and alarm
+    fixture windows. This is a local demonstration table, not a production log
+    platform. E302 rows overlap the current 华南/CDN-B anomaly.
+table_reference:
+  catalog: media
+  schema: main
+  table: log_events
+columns:
+  - name: timestamp
+    type: TIMESTAMP
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Time when the synthetic structured log was emitted.
+  - name: window_name
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Stable fixture window label shared with other Media models.
+  - name: region
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Playback region associated with the request.
+  - name: cdn
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: CDN associated with the request.
+  - name: service
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Structured service name such as cdn-gateway or origin-proxy.
+  - name: level
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Structured log level INFO, WARN, or ERROR.
+  - name: error_code
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Structured synthetic error or informational code.
+  - name: trace_id
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    is_primary_key: true
+    properties:
+      description: Synthetic request trace identifier.
+  - name: message
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Bounded synthetic log message.
+primary_key: trace_id
+cached: false

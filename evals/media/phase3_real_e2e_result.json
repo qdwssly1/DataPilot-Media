@@ -1,0 +1,2017 @@
+{
+  "query": "华南播放成功率下降并出现 E302，结合告警、日志和知识库分析原因，并给出排查建议。",
+  "run_status": "passed",
+  "success": true,
+  "failure_stage": null,
+  "failure_type": null,
+  "failure_summary": null,
+  "planner_tasks": [
+    {
+      "task_id": "T1",
+      "description": "查询 stream_sessions（经 stream_quality_metrics 语义对象）中 region = 华南 的会话，按 window_name、region 分组，返回 session_count、successful_sessions、failed_sessions 与由会话计数重算的 playback_success_rate，覆盖 current_window 与基线窗口，用于确认整体变化幅度与请求量。",
+      "task_type": "query",
+      "depends_on": [],
+      "status": "completed",
+      "metric_binding": {
+        "primary_metric": "playback_success_rate",
+        "unit": "ratio (0-1)",
+        "aggregation_semantics": "按窗口用 SUM(successful_sessions)/SUM(session_count) 由会话级计数重算，不对比率再平均",
+        "supporting_fields": [
+          "session_count",
+          "successful_sessions",
+          "failed_sessions"
+        ]
+      },
+      "requested_dimensions": [
+        "window_name",
+        "region"
+      ],
+      "window_role_binding": {
+        "comparison_target": "current_window",
+        "baseline_windows": [
+          "previous_window",
+          "previous_day",
+          "prior_year"
+        ],
+        "primary_baseline": null
+      }
+    },
+    {
+      "task_id": "T2",
+      "description": "在同一指标族内查询 stream_sessions（经 stream_quality_metrics）region = 华南 的会话，按 window_name、region、cdn 分组，返回 session_count、successful_sessions、failed_sessions 与重算的 playback_success_rate，用于定位华南内部各 CDN 在基线与当前窗口的差异化变化。",
+      "task_type": "query",
+      "depends_on": [],
+      "status": "completed",
+      "metric_binding": {
+        "primary_metric": "playback_success_rate",
+        "unit": "ratio (0-1)",
+        "aggregation_semantics": "按 window_name × cdn 用 SUM(successful_sessions)/SUM(session_count) 重算，不做比率平均",
+        "supporting_fields": [
+          "session_count",
+          "successful_sessions",
+          "failed_sessions"
+        ]
+      },
+      "requested_dimensions": [
+        "window_name",
+        "region",
+        "cdn"
+      ],
+      "window_role_binding": {
+        "comparison_target": "current_window",
+        "baseline_windows": [
+          "previous_window",
+          "previous_day",
+          "prior_year"
+        ],
+        "primary_baseline": null
+      }
+    },
+    {
+      "task_id": "T3",
+      "description": "独立证据查询 alarm_events 中 region = 华南 的行，覆盖 current_window 与基线窗口：返回告警总数，以及按 error_code（含 E302）、severity、status、cdn、window_name 的计数分布，并给出经过滤后有限条原始 message 样本作为排障示例；不请求代表性消息或任何文本型聚合。",
+      "task_type": "query",
+      "depends_on": [],
+      "status": "completed",
+      "metric_binding": {},
+      "requested_dimensions": [],
+      "window_role_binding": {
+        "comparison_target": "current_window",
+        "baseline_windows": [
+          "previous_window",
+          "previous_day",
+          "prior_year"
+        ],
+        "primary_baseline": null
+      }
+    },
+    {
+      "task_id": "T4",
+      "description": "独立证据查询 log_events 中 region = 华南 且 cdn = CDN-B 的行，覆盖 current_window 与基线窗口：按 window_name、level、service、error_code 返回日志计数分布，并给出 E302 相关行的有限条原始 message 与 trace_id 样本；不请求代表性文本或消息聚合函数。",
+      "task_type": "query",
+      "depends_on": [],
+      "status": "completed",
+      "metric_binding": {},
+      "requested_dimensions": [],
+      "window_role_binding": {
+        "comparison_target": "current_window",
+        "baseline_windows": [
+          "previous_window",
+          "previous_day",
+          "prior_year"
+        ],
+        "primary_baseline": null
+      }
+    },
+    {
+      "task_id": "T5",
+      "description": "基于华南整体与按 CDN 的窗口结果，计算 current_window 相对各基线窗口的播放成功率变化（绝对百分点与相对变化），并按失败会话数与分母占比计算各 CDN 对整体下降的加权贡献，指出贡献最大的 CDN；不得由当前窗口数值推断变化。",
+      "task_type": "analysis",
+      "depends_on": [
+        "T1",
+        "T2"
+      ],
+      "status": "completed",
+      "metric_binding": {},
+      "requested_dimensions": [],
+      "window_role_binding": {}
+    },
+    {
+      "task_id": "T6",
+      "description": "将 QoE 变化结论与告警分布（E302 计数、severity、status、受影响 CDN/区域）及 CDN-B 日志证据（ERROR 级 E302 按 service 分布、trace 样本）做同窗口、同区域、同 CDN 的时间对齐，并结合检索到的 E302 上游超时错误码说明与 CDN 播放成功率下降 SOP 解释可能原因；明确时间相关性不构成因果证明。",
+      "task_type": "analysis",
+      "depends_on": [
+        "T5",
+        "T3",
+        "T4"
+      ],
+      "status": "completed",
+      "metric_binding": {},
+      "requested_dimensions": [],
+      "window_role_binding": {}
+    },
+    {
+      "task_id": "T7",
+      "description": "输出最终回复：华南播放成功率下降幅度与受影响 CDN、E302 告警与日志证据、基于知识库的可能原因排序，以及分步骤排查建议与数据缺口说明。",
+      "task_type": "response",
+      "depends_on": [
+        "T6"
+      ],
+      "status": "completed",
+      "metric_binding": {},
+      "requested_dimensions": [],
+      "window_role_binding": {}
+    }
+  ],
+  "tool_routes": [
+    {
+      "route": "tool",
+      "tool_name": "query_qoe_metrics",
+      "reason": "Deterministic capability match (score=95).",
+      "arguments": {
+        "windows": [
+          "previous_window",
+          "current_window"
+        ],
+        "region": "华南",
+        "primary_metric": "playback_success_rate",
+        "group_by": [
+          "window_name",
+          "region"
+        ]
+      },
+      "deterministic": true,
+      "model_attempts": 0,
+      "latency_ms": 2.0349000114947557
+    },
+    {
+      "route": "tool",
+      "tool_name": "query_qoe_metrics",
+      "reason": "Deterministic capability match (score=95).",
+      "arguments": {
+        "windows": [
+          "previous_window",
+          "current_window"
+        ],
+        "region": "华南",
+        "primary_metric": "playback_success_rate",
+        "group_by": [
+          "window_name",
+          "region",
+          "cdn"
+        ]
+      },
+      "deterministic": true,
+      "model_attempts": 0,
+      "latency_ms": 1.1988000478595495
+    },
+    {
+      "route": "tool",
+      "tool_name": "get_alarm_events",
+      "reason": "Deterministic capability match (score=125).",
+      "arguments": {
+        "windows": [
+          "current_window"
+        ],
+        "region": "华南",
+        "error_code": "E302"
+      },
+      "deterministic": true,
+      "model_attempts": 0,
+      "latency_ms": 1.775299897417426
+    },
+    {
+      "route": "tool",
+      "tool_name": "query_logs",
+      "reason": "Deterministic capability match (score=130).",
+      "arguments": {
+        "windows": [
+          "current_window"
+        ],
+        "region": "华南",
+        "cdn": "CDN-B",
+        "error_code": "E302",
+        "level": "ERROR"
+      },
+      "deterministic": true,
+      "model_attempts": 0,
+      "latency_ms": 1.3001998886466026
+    }
+  ],
+  "tool_calls": [
+    {
+      "tool_name": "query_qoe_metrics",
+      "success": true,
+      "summary": "Returned 2 QoE metric row(s).",
+      "metadata": {
+        "arguments": {
+          "windows": [
+            "previous_window",
+            "current_window"
+          ],
+          "region": "华南",
+          "limit": 100,
+          "primary_metric": "playback_success_rate",
+          "group_by": [
+            "window_name",
+            "region"
+          ]
+        },
+        "columns": [
+          "window_name",
+          "region",
+          "session_count",
+          "successful_sessions",
+          "failed_sessions",
+          "playback_success_rate",
+          "average_startup_time_ms",
+          "total_buffer_duration_seconds",
+          "rebuffer_ratio"
+        ],
+        "row_count": 2,
+        "dry_plan": "succeeded",
+        "dimensions": [
+          "window_name",
+          "region"
+        ],
+        "metrics": [
+          "session_count",
+          "successful_sessions",
+          "failed_sessions",
+          "playback_success_rate",
+          "average_startup_time_ms",
+          "total_buffer_duration_seconds",
+          "rebuffer_ratio"
+        ],
+        "rebuffer_contract": "SUM(buffer_duration) / SUM(playback_duration)"
+      },
+      "evidence_summary": [
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "session_count": 60,
+          "successful_sessions": "43",
+          "failed_sessions": "17",
+          "playback_success_rate": 0.7166666666666667,
+          "average_startup_time_ms": 874.3333333333334,
+          "rebuffer_ratio": 0.004718468468468471
+        },
+        {
+          "window_name": "previous_window",
+          "region": "华南",
+          "session_count": 60,
+          "successful_sessions": "56",
+          "failed_sessions": "4",
+          "playback_success_rate": 0.9333333333333333,
+          "average_startup_time_ms": 576.0,
+          "rebuffer_ratio": 0.0013682432432432436
+        }
+      ],
+      "error": null,
+      "execution_time_ms": 150.73110000230372
+    },
+    {
+      "tool_name": "query_qoe_metrics",
+      "success": true,
+      "summary": "Returned 6 QoE metric row(s).",
+      "metadata": {
+        "arguments": {
+          "windows": [
+            "previous_window",
+            "current_window"
+          ],
+          "region": "华南",
+          "limit": 100,
+          "primary_metric": "playback_success_rate",
+          "group_by": [
+            "window_name",
+            "region",
+            "cdn"
+          ]
+        },
+        "columns": [
+          "window_name",
+          "region",
+          "cdn",
+          "session_count",
+          "successful_sessions",
+          "failed_sessions",
+          "playback_success_rate",
+          "average_startup_time_ms",
+          "total_buffer_duration_seconds",
+          "rebuffer_ratio"
+        ],
+        "row_count": 6,
+        "dry_plan": "succeeded",
+        "dimensions": [
+          "window_name",
+          "region",
+          "cdn"
+        ],
+        "metrics": [
+          "session_count",
+          "successful_sessions",
+          "failed_sessions",
+          "playback_success_rate",
+          "average_startup_time_ms",
+          "total_buffer_duration_seconds",
+          "rebuffer_ratio"
+        ],
+        "rebuffer_contract": "SUM(buffer_duration) / SUM(playback_duration)"
+      },
+      "evidence_summary": [
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "cdn": "CDN-A",
+          "session_count": 20,
+          "successful_sessions": "17",
+          "failed_sessions": "3",
+          "playback_success_rate": 0.85,
+          "average_startup_time_ms": 576.0,
+          "rebuffer_ratio": 0.0017294520547945205
+        },
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "cdn": "CDN-B",
+          "session_count": 20,
+          "successful_sessions": "10",
+          "failed_sessions": "10",
+          "playback_success_rate": 0.5,
+          "average_startup_time_ms": 1406.0,
+          "rebuffer_ratio": 0.010320945945945945
+        },
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "cdn": "CDN-C",
+          "session_count": 20,
+          "successful_sessions": "16",
+          "failed_sessions": "4",
+          "playback_success_rate": 0.8,
+          "average_startup_time_ms": 641.0,
+          "rebuffer_ratio": 0.0020999999999999994
+        },
+        {
+          "window_name": "previous_window",
+          "region": "华南",
+          "cdn": "CDN-A",
+          "session_count": 20,
+          "successful_sessions": "19",
+          "failed_sessions": "1",
+          "playback_success_rate": 0.95,
+          "average_startup_time_ms": 546.0,
+          "rebuffer_ratio": 0.0012157534246575342
+        },
+        {
+          "window_name": "previous_window",
+          "region": "华南",
+          "cdn": "CDN-B",
+          "session_count": 20,
+          "successful_sessions": "19",
+          "failed_sessions": "1",
+          "playback_success_rate": 0.95,
+          "average_startup_time_ms": 571.0,
+          "rebuffer_ratio": 0.0012837837837837841
+        },
+        {
+          "window_name": "previous_window",
+          "region": "华南",
+          "cdn": "CDN-C",
+          "session_count": 20,
+          "successful_sessions": "18",
+          "failed_sessions": "2",
+          "playback_success_rate": 0.9,
+          "average_startup_time_ms": 611.0,
+          "rebuffer_ratio": 0.0015999999999999999
+        }
+      ],
+      "error": null,
+      "execution_time_ms": 38.80179999396205
+    },
+    {
+      "tool_name": "get_alarm_events",
+      "success": true,
+      "summary": "Returned 3 alarm event row(s).",
+      "metadata": {
+        "arguments": {
+          "windows": [
+            "current_window"
+          ],
+          "region": "华南",
+          "limit": 100,
+          "error_code": "E302"
+        },
+        "columns": [
+          "alarm_id",
+          "timestamp",
+          "window_name",
+          "region",
+          "cdn",
+          "error_code",
+          "severity",
+          "status",
+          "message"
+        ],
+        "row_count": 3,
+        "dry_plan": "succeeded",
+        "status_distribution": {
+          "investigating": 1,
+          "open": 1,
+          "resolved": 1
+        },
+        "alarm_evidence": {
+          "version": "1.0",
+          "total_count": 3,
+          "count_by_status": {
+            "investigating": 1,
+            "open": 1,
+            "resolved": 1
+          },
+          "count_by_severity": {
+            "high": 3
+          },
+          "count_by_error_code": {
+            "E302": 3
+          },
+          "count_by_cdn": {
+            "CDN-B": 3
+          },
+          "count_by_service": {},
+          "count_by_window": {
+            "current_window": 3
+          },
+          "affected_objects": {
+            "region": [
+              "华南"
+            ],
+            "cdn": [
+              "CDN-B"
+            ],
+            "service": []
+          },
+          "sample_events": [
+            {
+              "alarm_id": "alarm-cur-001",
+              "timestamp": "2026-09-01T11:06:00",
+              "window_name": "current_window",
+              "region": "华南",
+              "cdn": "CDN-B",
+              "status": "open",
+              "severity": "high",
+              "error_code": "E302",
+              "message": "CDN upstream request timeout rate exceeded the critical threshold."
+            },
+            {
+              "alarm_id": "alarm-cur-002",
+              "timestamp": "2026-09-01T11:18:00",
+              "window_name": "current_window",
+              "region": "华南",
+              "cdn": "CDN-B",
+              "status": "investigating",
+              "severity": "high",
+              "error_code": "E302",
+              "message": "CDN edge nodes continued reporting upstream request timeouts."
+            },
+            {
+              "alarm_id": "alarm-cur-003",
+              "timestamp": "2026-09-01T11:34:00",
+              "window_name": "current_window",
+              "region": "华南",
+              "cdn": "CDN-B",
+              "status": "resolved",
+              "severity": "high",
+              "error_code": "E302",
+              "message": "CDN upstream timeout alarm remained above the recovery threshold."
+            }
+          ],
+          "sample_limit": 3,
+          "sample_semantics": "bounded_examples_not_distribution"
+        }
+      },
+      "evidence_summary": [
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "cdn": "CDN-B",
+          "error_code": "E302",
+          "severity": "high",
+          "status": "open"
+        },
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "cdn": "CDN-B",
+          "error_code": "E302",
+          "severity": "high",
+          "status": "investigating"
+        },
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "cdn": "CDN-B",
+          "error_code": "E302",
+          "severity": "high",
+          "status": "resolved"
+        }
+      ],
+      "error": null,
+      "execution_time_ms": 32.071599969640374
+    },
+    {
+      "tool_name": "query_logs",
+      "success": true,
+      "summary": "Returned 3 structured log row(s).",
+      "metadata": {
+        "arguments": {
+          "windows": [
+            "current_window"
+          ],
+          "region": "华南",
+          "cdn": "CDN-B",
+          "limit": 100,
+          "level": "ERROR",
+          "error_code": "E302"
+        },
+        "columns": [
+          "timestamp",
+          "window_name",
+          "region",
+          "cdn",
+          "service",
+          "level",
+          "error_code",
+          "trace_id",
+          "message"
+        ],
+        "row_count": 3,
+        "dry_plan": "succeeded"
+      },
+      "evidence_summary": [
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "cdn": "CDN-B",
+          "error_code": "E302",
+          "service": "origin-proxy",
+          "level": "ERROR"
+        },
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "cdn": "CDN-B",
+          "error_code": "E302",
+          "service": "cdn-gateway",
+          "level": "ERROR"
+        },
+        {
+          "window_name": "current_window",
+          "region": "华南",
+          "cdn": "CDN-B",
+          "error_code": "E302",
+          "service": "origin-proxy",
+          "level": "ERROR"
+        }
+      ],
+      "error": null,
+      "execution_time_ms": 33.386699855327606
+    }
+  ],
+  "sql_fallback_count": 0,
+  "sql_evidence": [
+    {
+      "task_id": "T1",
+      "success": true,
+      "columns": [
+        "window_name",
+        "region",
+        "session_count",
+        "successful_sessions",
+        "failed_sessions",
+        "playback_success_rate",
+        "average_startup_time_ms",
+        "total_buffer_duration_seconds",
+        "rebuffer_ratio"
+      ],
+      "row_count": 2,
+      "retry_count": 0,
+      "semantic_retry_count": 0,
+      "execution_time_ms": 150.73110000230372,
+      "execution_source": "tool",
+      "tool_name": "query_qoe_metrics"
+    },
+    {
+      "task_id": "T1",
+      "success": true,
+      "columns": [
+        "window_name",
+        "region",
+        "session_count",
+        "successful_sessions",
+        "failed_sessions",
+        "playback_success_rate"
+      ],
+      "row_count": 4,
+      "retry_count": 0,
+      "semantic_retry_count": 1,
+      "execution_time_ms": 2338.052000151947,
+      "execution_source": "sql",
+      "tool_name": null
+    },
+    {
+      "task_id": "T2",
+      "success": true,
+      "columns": [
+        "window_name",
+        "region",
+        "cdn",
+        "session_count",
+        "successful_sessions",
+        "failed_sessions",
+        "playback_success_rate",
+        "average_startup_time_ms",
+        "total_buffer_duration_seconds",
+        "rebuffer_ratio"
+      ],
+      "row_count": 6,
+      "retry_count": 0,
+      "semantic_retry_count": 0,
+      "execution_time_ms": 38.80179999396205,
+      "execution_source": "tool",
+      "tool_name": "query_qoe_metrics"
+    },
+    {
+      "task_id": "T3",
+      "success": true,
+      "columns": [
+        "alarm_id",
+        "timestamp",
+        "window_name",
+        "region",
+        "cdn",
+        "error_code",
+        "severity",
+        "status",
+        "message"
+      ],
+      "row_count": 3,
+      "retry_count": 0,
+      "semantic_retry_count": 0,
+      "execution_time_ms": 32.071599969640374,
+      "execution_source": "tool",
+      "tool_name": "get_alarm_events"
+    },
+    {
+      "task_id": "T3",
+      "success": true,
+      "columns": [
+        "record_type",
+        "dimension_value",
+        "cnt",
+        "message"
+      ],
+      "row_count": 21,
+      "retry_count": 0,
+      "semantic_retry_count": 1,
+      "execution_time_ms": 13327.11310009472,
+      "execution_source": "sql",
+      "tool_name": null
+    },
+    {
+      "task_id": "T4",
+      "success": true,
+      "columns": [
+        "timestamp",
+        "window_name",
+        "region",
+        "cdn",
+        "service",
+        "level",
+        "error_code",
+        "trace_id",
+        "message"
+      ],
+      "row_count": 3,
+      "retry_count": 0,
+      "semantic_retry_count": 0,
+      "execution_time_ms": 33.386699855327606,
+      "execution_source": "tool",
+      "tool_name": "query_logs"
+    },
+    {
+      "task_id": "T4",
+      "success": true,
+      "columns": [
+        "record_type",
+        "window_name",
+        "level",
+        "service",
+        "error_code",
+        "log_count",
+        "message",
+        "trace_id"
+      ],
+      "row_count": 8,
+      "retry_count": 0,
+      "semantic_retry_count": 1,
+      "execution_time_ms": 5531.336099840701,
+      "execution_source": "sql",
+      "tool_name": null
+    }
+  ],
+  "retrieval_calls": 1,
+  "retrieved_chunk_ids": [
+    "media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+    "media-error-codes::01-e302-cdn-upstream-timeout",
+    "media-qoe-metrics::01-playback-success-rate",
+    "media-troubleshooting-sop::02-startup-latency-increase-sop",
+    "media-qoe-metrics::04-failed-session-count"
+  ],
+  "retrieval_top_k": 5,
+  "retrieval_latency_ms": 3.032500157132745,
+  "reviewer_decisions": [
+    {
+      "task_id": "T1",
+      "decision": "retry",
+      "reason_summary": "华南过滤、按 window_name/region 分组及由会话计数重算的成功率正确，但仅覆盖 previous_window 一个基线，声明的 previous_day、prior_year 基线窗口缺失。",
+      "confidence": 0.6,
+      "review_retry_count": 0
+    },
+    {
+      "task_id": "T1",
+      "decision": "approve",
+      "reason_summary": "已按 region='华南' 与 window_name,region 分组，覆盖 current_window、previous_window、previous_day、prior_year 四个窗口，成功率由 SUM(successful_sessions)/SUM(session_count) 重算，未新增维度，满足 T1 契约。",
+      "confidence": 0.88,
+      "review_retry_count": 1
+    },
+    {
+      "task_id": "T2",
+      "decision": "approve",
+      "reason_summary": "结果完整：region=华南、2 窗口 × 3 CDN 共 6 行，session_count=successful+failed，playback_success_rate 由会话级成败重算，可支撑 T2 的 CDN 差异化定位。",
+      "confidence": 0.68,
+      "review_retry_count": 0
+    },
+    {
+      "task_id": "T3",
+      "decision": "retry",
+      "reason_summary": "Query restricts to error_code='E302' and window_name='current_window', so baseline windows and the full error_code distribution required by T3 are missing.",
+      "confidence": 0.9,
+      "review_retry_count": 0
+    },
+    {
+      "task_id": "T3",
+      "decision": "approve",
+      "reason_summary": "Corrected query covers region=华南 across current_window plus all three baseline windows, returning total=7 and count distributions by error_code (E302=3, W201=2, I101=2), severity, status, cdn, window_name, plus bounded message samples.",
+      "confidence": 0.88,
+      "review_retry_count": 1
+    },
+    {
+      "task_id": "T4",
+      "decision": "retry",
+      "reason_summary": "Only current_window returned; baseline windows missing and no count distribution by window_name/level/service/error_code. Query hard-filtered to E302+ERROR, so level and error_code distributions cannot be produced.",
+      "confidence": 0.9,
+      "review_retry_count": 0
+    },
+    {
+      "task_id": "T4",
+      "decision": "approve",
+      "reason_summary": "Query covers all four windows on log_events with region=华南 and cdn=CDN-B, returns GROUP BY counts by window_name/level/service/error_code, plus limited E302 samples with message and trace_id.",
+      "confidence": 0.9,
+      "review_retry_count": 1
+    }
+  ],
+  "analyst_status": {
+    "status": "completed",
+    "results": [
+      {
+        "task_id": "T5",
+        "success": true,
+        "summary": "Normalized 1 explicit window comparison(s).",
+        "source_task_ids": [
+          "T1",
+          "T2"
+        ],
+        "retry_count": 0,
+        "error": null
+      },
+      {
+        "task_id": "T6",
+        "success": true,
+        "summary": "DATA EVIDENCE (T5): 华南 previous_window→current_window 播放成功率由 56/60 (0.9333) 降至 43/60 (0.7167)，delta -0.2167；CDN-A、CDN-B、CDN-C 全部被判定 declined，其中 CDN-B 降幅最大 (0.95→0.50, -0.45)。DATA EVIDENCE (T3): 同窗口华南 CDN-B 的 E302 告警 3 条，severity 全为 high，状态混合为 open 1、investigating 1、resolved 1。DATA EVIDENCE (T4): current_window ERROR 级 E302 按 service 为 origin-proxy 2、cdn-gateway 1。KNOWLEDGE EVIDENCE: E302 定义为上游超时症状，SOP 建议核查上游时延/超时率、源站健康与路由。INFERENCE: 上述为同窗口同区域同 CDN 的时间与维度相关性，可能原因指向上游超时，但不构成因果证明。",
+        "source_task_ids": [
+          "T5",
+          "T3",
+          "T4"
+        ],
+        "retry_count": 0,
+        "error": null
+      }
+    ]
+  },
+  "final_answer_status": {
+    "status": "completed",
+    "success": true,
+    "retry_count": 0
+  },
+  "final_answer": "DATA EVIDENCE\n- region=华南; Overall playback_success_rate: previous_window=93.33%, current_window=71.67%, delta=-21.67 percentage points, relative_change=-23.21%. [data:T2]\n- region=华南; cdn=CDN-A: playback_success_rate previous_window=95.00%, current_window=85.00%, delta=-10.00 percentage points, relative_change=-10.53%; classification=declined. [data:T2]\n- region=华南; cdn=CDN-B: playback_success_rate previous_window=95.00%, current_window=50.00%, delta=-45.00 percentage points, relative_change=-47.37%; classification=declined. This is the largest observed decline among paired groups. [data:T2]\n- region=华南; cdn=CDN-C: playback_success_rate previous_window=90.00%, current_window=80.00%, delta=-10.00 percentage points, relative_change=-11.11%; classification=declined. [data:T2]\n- Status distribution (windows=['current_window'], region=华南, error_code=E302, severity=ALL, level=ALL, cdn=ALL, group_dimensions=[]): investigating=1, open=1, resolved=1; total=3. Severity distribution: high=3. Error-code distribution: E302=3. CDN distribution: CDN-B=3. Bounded message samples (examples only, not distribution or all-event facts): \"CDN upstream request timeout rate exceeded the critical threshold.\" | \"CDN edge nodes continued reporting upstream request timeouts.\" | \"CDN upstream timeout alarm remained above the recovery threshold.\". [data:T3]\n- Reviewed task T1 returned 2 rows; window_name distribution=[current_window:1,previous_window:1]; region distribution=[华南:2]; session_count range=60..60; successful_sessions range=43..56; failed_sessions range=4..17; playback_success_rate range=0.7166666666666667..0.9333333333333333; average_startup_time_ms range=576..874.3333333333334; total_buffer_duration_seconds range=48.60000000000001..167.60000000000008; rebuffer_ratio range=0.0013682432432432436..0.004718468468468471. [data:T1]\n- Reviewed task T1 returned 4 rows; window_name distribution=[current_window:1,previous_day:1,previous_window:1,prior_year:1]; region distribution=[华南:4]; session_count range=60..60; successful_sessions range=43..56; failed_sessions range=4..17; playback_success_rate range=0.7166666666666667..0.9333333333333333. [data:T1]\n- Reviewed task T4 returned 3 rows; window_name distribution=[current_window:3]; region distribution=[华南:3]; cdn distribution=[CDN-B:3]; service distribution=[cdn-gateway:1,origin-proxy:2]; level distribution=[ERROR:3]; error_code distribution=[E302:3]. [data:T4]\n- Reviewed task T4 returned 8 rows; record_type distribution=[distribution:4,e302_sample:4]; window_name distribution=[current_window:7,previous_window:1]; level distribution=[ERROR:5,INFO:1,WARN:2]; service distribution=[cdn-gateway:5,origin-proxy:3]; error_code distribution=[E302:7,I000:1]; log_count range=1..2. [data:T4]\nKNOWLEDGE EVIDENCE\n- CDN Playback Success Degradation SOP: Define equal baseline and current windows and recompute playback success rate from successful and total sessions; For E302, inspect upstream latency, timeout rate, origin health, and routing. [knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop]\n- E302 — CDN Upstream Timeout: ## E302 — CDN Upstream Timeout E302 means that a CDN edge or intermediate node timed out while waiting for an upstream response. E302 is evidence of an upstream-timeout symptom.… [knowledge:media-error-codes::01-e302-cdn-upstream-timeout]\n- Playback Success Rate / 播放成功率: ## Playback Success Rate / 播放成功率 ### Definition The share of attempted playback sessions that start successfully. In the Media synthetic model, a successful session has `play_success = true`. [knowledge:media-qoe-metrics::01-playback-success-rate]\n- Startup Latency Increase SOP: ## Startup Latency Increase SOP 1. Compare average and P95 startup time over matched baseline/current windows, together with playback success rate and session count. [knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop]\n- Failed Session Count / 失败会话数: ## Failed Session Count / 失败会话数 ### Definition The number of attempted playback sessions that did not start successfully. Pair the count with total attempts or playback success rate because traffic volume changes can move the count without changing reliability. [knowledge:media-qoe-metrics::04-failed-session-count]\nINFERENCE\n- [observation] 针对华南区域，以 previous_window 为基线，整体 的 playback_success_rate 从 93.33% 变为 71.67%，下降 21.67 个百分点（当前窗口：current_window）。 [supports: data:comparison:1:overall]\n- [observation] 以 previous_window 为基线，CDN-A、CDN-B、CDN-C 出现下降，因此不能作为稳定、未受影响的对照组。 [supports: data:comparison:1:group:1, data:comparison:1:group:2, data:comparison:1:group:3]\n- [observation] 针对 cdn=CDN-B，以 previous_window 为基线，CDN-B 的 playback_success_rate 从 95% 变为 50%，下降 45 个百分点（当前窗口：current_window）。；Reviewed task T4 returned 3 rows; window_name distribution=[current_window:3]; region distribution=[华南:3]; cdn distribution=[CDN-B:3]; service distribution=[cdn-gateway:1,origin-proxy:2]; level distribution=[ERROR:3]; error_code distribution=[E302:3].；Reviewed task T4 returned 8 rows; record_type distribution=[distribution:4,e302_sample:4]; window_name distribution=[current_window:7,previous_window:1]; level distribution=[ERROR:5,INFO:1,WARN:2]; service distribution=[cdn-gateway:5,origin-proxy:3]; error_code distribution=[E302:7,I000:1]; log_count range=1..2. [supports: data:comparison:1:group:2, data:tool-result:4, data:result:4]\n- [observation] Status distribution (windows=['current_window'], region=华南, error_code=E302, severity=ALL, level=ALL, cdn=ALL, group_dimensions=[]): investigating=1, open=1, resolved=1; total=3. Severity distribution: high=3. Error-code distribution: E302=3. CDN distribution: CDN-B=3. Bounded message samples (examples only, not distribution or all-event facts): \"CDN upstream request timeout rate exceeded the critical threshold.\" | \"CDN edge nodes continued reporting upstream request timeouts.\" | \"CDN upstream timeout alarm remained above the recovery threshold.\". [supports: data:status:1]\n- [knowledge] E302 — CDN Upstream Timeout: ## E302 — CDN Upstream Timeout E302 means that a CDN edge or intermediate node timed out while waiting for an upstream response. E302 is evidence of an upstream-timeout symptom.…；Playback Success Rate / 播放成功率: ## Playback Success Rate / 播放成功率 ### Definition The share of attempted playback sessions that start successfully. In the Media synthetic model, a successful session has `play_success = true`.；Failed Session Count / 失败会话数: ## Failed Session Count / 失败会话数 ### Definition The number of attempted playback sessions that did not start successfully. Pair the count with total attempts or playback success rate because traffic volume changes can move the count without changing reliability. [supports: knowledge:media-error-codes::01-e302-cdn-upstream-timeout, knowledge:media-qoe-metrics::01-playback-success-rate, knowledge:media-qoe-metrics::04-failed-session-count]\n- [correlation] 针对 cdn=CDN-B，CDN-B 的 previous_window→current_window playback_success_rate 变化 与 结构化日志证据 在所选证据范围内同时出现或存在相关性，但当前证据不足以证明因果关系。 [supports: data:comparison:1:group:2, data:tool-result:4, data:result:4, knowledge:media-error-codes::01-e302-cdn-upstream-timeout, limitation:correlation_not_causation, limitation:missing_trace_data]\n- [hypothesis] 针对 cdn=CDN-B，基于所选数据及其明确证据缺口，E302 — CDN Upstream Timeout、CDN Playback Success Degradation SOP 所描述的因素是当前需要优先验证的候选影响因素，尚不能确认其为根因。 [supports: data:comparison:1:group:2, data:tool-result:4, data:result:4, knowledge:media-error-codes::01-e302-cdn-upstream-timeout, knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop, limitation:correlation_not_causation, limitation:missing_origin_metrics]\n- [hypothesis] 针对 cdn=CDN-B，基于所选数据及其明确证据缺口，CDN Playback Success Degradation SOP 所描述的因素是当前需要优先验证的候选影响因素，尚不能确认其为根因。 [supports: data:comparison:1:group:2, data:tool-result:4, data:result:4, knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop, limitation:correlation_not_causation, limitation:missing_routing_change_records]\n- [recommendation] 针对华南区域，根据 CDN Playback Success Degradation SOP、Startup Latency Increase SOP，建议进一步检查或验证与这些证据缺口对应的数据：Origin latency, saturation, and timeout telemetry were not included.；Routing, configuration, and deployment change records were not included.；The paired comparison covers only the reviewed windows; broader windows or a controlled recovery are still needed. 该建议不代表已证明根因。 [supports: data:comparison:1:overall, knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop, knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop, limitation:missing_origin_metrics, limitation:missing_routing_change_records, limitation:limited_time_windows]\n- [recommendation] 针对 cdn=CDN-B，根据 E302 — CDN Upstream Timeout、CDN Playback Success Degradation SOP，建议进一步检查或验证与这些证据缺口对应的数据：No request-level trace join proves that the QoE, alarm, and log records describe the same requests.；Origin latency, saturation, and timeout telemetry were not included.；Routing, configuration, and deployment change records were not included. 该建议不代表已证明根因。 [supports: data:comparison:1:group:2, data:tool-result:4, data:result:4, knowledge:media-error-codes::01-e302-cdn-upstream-timeout, knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop, limitation:missing_trace_data, limitation:missing_origin_metrics, limitation:missing_routing_change_records]\nLIMITATION\n- Temporal and dimensional co-occurrence supports correlation or a candidate hypothesis, but does not prove causation. [sources: data:comparison:1:overall, data:comparison:1:group:1, data:comparison:1:group:2, data:comparison:1:group:3, data:status:1, data:tool-result:1, data:result:1, data:result:3, data:tool-result:4, data:result:4, policy:correlation-not-causation]\n- No request-level trace join proves that the QoE, alarm, and log records describe the same requests. [sources: T1, T2, T3, T4]\n- Origin latency, saturation, and timeout telemetry were not included. [sources: T1, T2, T3, T4]\n- Routing, configuration, and deployment change records were not included. [sources: T1, T2, T3, T4]\n- The paired comparison covers only the reviewed windows; broader windows or a controlled recovery are still needed. [sources: T1, T2, T3, T4]",
+  "evidence_pack_summary": {
+    "version": "1.0",
+    "reviewed_task_ids": [
+      "T1",
+      "T2",
+      "T3",
+      "T4"
+    ],
+    "reviewed_evidence": [
+      {
+        "task_id": "T1",
+        "evidence_sources": [
+          {
+            "source_id": "source:T1:tool:query_qoe_metrics",
+            "role": "base_tool_evidence",
+            "execution_source": "tool",
+            "tool_name": "query_qoe_metrics"
+          },
+          {
+            "source_id": "source:T1:sql-correction:1",
+            "role": "correction_evidence",
+            "execution_source": "sql",
+            "semantic_retry_count": 1
+          }
+        ],
+        "preserved_fields": [
+          "aggregation_semantics",
+          "columns",
+          "dimensions",
+          "dry_plan",
+          "metric_binding",
+          "metrics",
+          "rebuffer_contract",
+          "requested_dimensions",
+          "row_count",
+          "units",
+          "window_role_binding"
+        ],
+        "superseded_fields": [],
+        "final_review_status": "approve",
+        "metric_binding": {
+          "primary_metric": "playback_success_rate",
+          "unit": "ratio (0-1)",
+          "aggregation_semantics": "按窗口用 SUM(successful_sessions)/SUM(session_count) 由会话级计数重算，不对比率再平均",
+          "supporting_fields": [
+            "session_count",
+            "successful_sessions",
+            "failed_sessions"
+          ]
+        },
+        "requested_dimensions": [],
+        "window_role_binding": {
+          "comparison_target": "current_window",
+          "baseline_windows": [
+            "previous_window",
+            "previous_day",
+            "prior_year"
+          ],
+          "primary_baseline": null
+        }
+      },
+      {
+        "task_id": "T2",
+        "evidence_sources": [
+          {
+            "source_id": "source:T2:tool:query_qoe_metrics",
+            "role": "tool_evidence",
+            "execution_source": "tool",
+            "tool_name": "query_qoe_metrics"
+          }
+        ],
+        "preserved_fields": [],
+        "superseded_fields": [],
+        "final_review_status": "approve",
+        "metric_binding": {
+          "primary_metric": "playback_success_rate",
+          "unit": "ratio (0-1)",
+          "aggregation_semantics": "按 window_name × cdn 用 SUM(successful_sessions)/SUM(session_count) 重算，不做比率平均",
+          "supporting_fields": [
+            "session_count",
+            "successful_sessions",
+            "failed_sessions"
+          ]
+        },
+        "requested_dimensions": [
+          "cdn"
+        ],
+        "window_role_binding": {
+          "comparison_target": "current_window",
+          "baseline_windows": [
+            "previous_window",
+            "previous_day",
+            "prior_year"
+          ],
+          "primary_baseline": null
+        }
+      },
+      {
+        "task_id": "T3",
+        "evidence_sources": [
+          {
+            "source_id": "source:T3:tool:get_alarm_events",
+            "role": "base_tool_evidence",
+            "execution_source": "tool",
+            "tool_name": "get_alarm_events"
+          },
+          {
+            "source_id": "source:T3:sql-correction:1",
+            "role": "correction_evidence",
+            "execution_source": "sql",
+            "semantic_retry_count": 1
+          }
+        ],
+        "preserved_fields": [
+          "alarm_evidence",
+          "columns",
+          "dry_plan",
+          "row_count",
+          "status_distribution",
+          "window_role_binding"
+        ],
+        "superseded_fields": [],
+        "final_review_status": "approve",
+        "metric_binding": {},
+        "requested_dimensions": [],
+        "window_role_binding": {
+          "comparison_target": "current_window",
+          "baseline_windows": [
+            "previous_window",
+            "previous_day",
+            "prior_year"
+          ],
+          "primary_baseline": null
+        }
+      },
+      {
+        "task_id": "T4",
+        "evidence_sources": [
+          {
+            "source_id": "source:T4:tool:query_logs",
+            "role": "base_tool_evidence",
+            "execution_source": "tool",
+            "tool_name": "query_logs"
+          },
+          {
+            "source_id": "source:T4:sql-correction:1",
+            "role": "correction_evidence",
+            "execution_source": "sql",
+            "semantic_retry_count": 1
+          }
+        ],
+        "preserved_fields": [
+          "columns",
+          "dry_plan",
+          "row_count",
+          "window_role_binding"
+        ],
+        "superseded_fields": [],
+        "final_review_status": "approve",
+        "metric_binding": {},
+        "requested_dimensions": [],
+        "window_role_binding": {
+          "comparison_target": "current_window",
+          "baseline_windows": [
+            "previous_window",
+            "previous_day",
+            "prior_year"
+          ],
+          "primary_baseline": null
+        }
+      }
+    ],
+    "data_evidence": [
+      {
+        "evidence_id": "data:comparison:1:overall",
+        "kind": "metric_comparison",
+        "source_task_ids": [
+          "T2"
+        ],
+        "source_evidence_ids": [
+          "source:T2:tool:query_qoe_metrics"
+        ],
+        "facts": {
+          "metric": "playback_success_rate",
+          "baseline_window": "previous_window",
+          "baseline_value": 0.9333333333333333,
+          "current_window": "current_window",
+          "current_value": 0.7166666666666667,
+          "delta": -0.21666666666666667,
+          "relative_change": -0.23214285714285715,
+          "filters": {
+            "region": "华南"
+          }
+        }
+      },
+      {
+        "evidence_id": "data:comparison:1:group:1",
+        "kind": "group_comparison",
+        "source_task_ids": [
+          "T2"
+        ],
+        "source_evidence_ids": [
+          "source:T2:tool:query_qoe_metrics"
+        ],
+        "facts": {
+          "dimension": "cdn",
+          "group": "CDN-A",
+          "metric": "playback_success_rate",
+          "baseline_window": "previous_window",
+          "baseline_value": 0.95,
+          "current_window": "current_window",
+          "current_value": 0.85,
+          "delta": -0.09999999999999998,
+          "relative_change": -0.10526315789473682,
+          "classification": "declined",
+          "is_largest_decline": false,
+          "filters": {
+            "region": "华南"
+          }
+        }
+      },
+      {
+        "evidence_id": "data:comparison:1:group:2",
+        "kind": "group_comparison",
+        "source_task_ids": [
+          "T2"
+        ],
+        "source_evidence_ids": [
+          "source:T2:tool:query_qoe_metrics"
+        ],
+        "facts": {
+          "dimension": "cdn",
+          "group": "CDN-B",
+          "metric": "playback_success_rate",
+          "baseline_window": "previous_window",
+          "baseline_value": 0.95,
+          "current_window": "current_window",
+          "current_value": 0.5,
+          "delta": -0.44999999999999996,
+          "relative_change": -0.47368421052631576,
+          "classification": "declined",
+          "is_largest_decline": true,
+          "filters": {
+            "region": "华南"
+          }
+        }
+      },
+      {
+        "evidence_id": "data:comparison:1:group:3",
+        "kind": "group_comparison",
+        "source_task_ids": [
+          "T2"
+        ],
+        "source_evidence_ids": [
+          "source:T2:tool:query_qoe_metrics"
+        ],
+        "facts": {
+          "dimension": "cdn",
+          "group": "CDN-C",
+          "metric": "playback_success_rate",
+          "baseline_window": "previous_window",
+          "baseline_value": 0.9,
+          "current_window": "current_window",
+          "current_value": 0.8,
+          "delta": -0.09999999999999998,
+          "relative_change": -0.11111111111111108,
+          "classification": "declined",
+          "is_largest_decline": false,
+          "filters": {
+            "region": "华南"
+          }
+        }
+      },
+      {
+        "evidence_id": "data:status:1",
+        "kind": "alarm_status_distribution",
+        "source_task_ids": [
+          "T3"
+        ],
+        "source_evidence_ids": [
+          "source:T3:tool:get_alarm_events"
+        ],
+        "facts": {
+          "distribution": [
+            {
+              "value": "investigating",
+              "count": 1
+            },
+            {
+              "value": "open",
+              "count": 1
+            },
+            {
+              "value": "resolved",
+              "count": 1
+            }
+          ],
+          "mixed": true,
+          "total": 3,
+          "severity_distribution": {
+            "high": 3
+          },
+          "error_code_distribution": {
+            "E302": 3
+          },
+          "cdn_distribution": {
+            "CDN-B": 3
+          },
+          "service_distribution": {},
+          "affected_objects": {
+            "region": [
+              "华南"
+            ],
+            "cdn": [
+              "CDN-B"
+            ],
+            "service": []
+          },
+          "sample_events": [
+            {
+              "alarm_id": "alarm-cur-001",
+              "timestamp": "2026-09-01 11:06:00",
+              "window_name": "current_window",
+              "region": "华南",
+              "cdn": "CDN-B",
+              "status": "open",
+              "severity": "high",
+              "error_code": "E302",
+              "message": "CDN upstream request timeout rate exceeded the critical threshold."
+            },
+            {
+              "alarm_id": "alarm-cur-002",
+              "timestamp": "2026-09-01 11:18:00",
+              "window_name": "current_window",
+              "region": "华南",
+              "cdn": "CDN-B",
+              "status": "investigating",
+              "severity": "high",
+              "error_code": "E302",
+              "message": "CDN edge nodes continued reporting upstream request timeouts."
+            },
+            {
+              "alarm_id": "alarm-cur-003",
+              "timestamp": "2026-09-01 11:34:00",
+              "window_name": "current_window",
+              "region": "华南",
+              "cdn": "CDN-B",
+              "status": "resolved",
+              "severity": "high",
+              "error_code": "E302",
+              "message": "CDN upstream timeout alarm remained above the recovery threshold."
+            }
+          ],
+          "sample_semantics": "bounded_examples_not_distribution"
+        }
+      },
+      {
+        "evidence_id": "data:tool-result:1",
+        "kind": "reviewed_tool_result_summary",
+        "source_task_ids": [
+          "T1"
+        ],
+        "source_evidence_ids": [
+          "source:T1:tool:query_qoe_metrics"
+        ],
+        "facts": {
+          "row_count": 2,
+          "execution_source": "tool",
+          "tool_name": "query_qoe_metrics",
+          "evidence_role": "base_tool_evidence"
+        }
+      },
+      {
+        "evidence_id": "data:result:1",
+        "kind": "reviewed_result_summary",
+        "source_task_ids": [
+          "T1"
+        ],
+        "source_evidence_ids": [
+          "source:T1:sql-correction:1"
+        ],
+        "facts": {
+          "row_count": 4,
+          "execution_source": "sql",
+          "tool_name": null,
+          "evidence_role": "correction_evidence"
+        }
+      },
+      {
+        "evidence_id": "data:result:3",
+        "kind": "reviewed_result_summary",
+        "source_task_ids": [
+          "T3"
+        ],
+        "source_evidence_ids": [
+          "source:T3:sql-correction:1"
+        ],
+        "facts": {
+          "row_count": 21,
+          "execution_source": "sql",
+          "tool_name": null,
+          "evidence_role": "correction_evidence"
+        }
+      },
+      {
+        "evidence_id": "data:tool-result:4",
+        "kind": "reviewed_tool_result_summary",
+        "source_task_ids": [
+          "T4"
+        ],
+        "source_evidence_ids": [
+          "source:T4:tool:query_logs"
+        ],
+        "facts": {
+          "row_count": 3,
+          "execution_source": "tool",
+          "tool_name": "query_logs",
+          "evidence_role": "base_tool_evidence"
+        }
+      },
+      {
+        "evidence_id": "data:result:4",
+        "kind": "reviewed_result_summary",
+        "source_task_ids": [
+          "T4"
+        ],
+        "source_evidence_ids": [
+          "source:T4:sql-correction:1"
+        ],
+        "facts": {
+          "row_count": 8,
+          "execution_source": "sql",
+          "tool_name": null,
+          "evidence_role": "correction_evidence"
+        }
+      }
+    ],
+    "knowledge_evidence": [
+      {
+        "evidence_id": "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "title": "CDN Playback Success Degradation SOP",
+        "source_category": "troubleshooting_sop"
+      },
+      {
+        "evidence_id": "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "title": "E302 — CDN Upstream Timeout",
+        "source_category": "error_code"
+      },
+      {
+        "evidence_id": "knowledge:media-qoe-metrics::01-playback-success-rate",
+        "title": "Playback Success Rate / 播放成功率",
+        "source_category": "qoe_metric"
+      },
+      {
+        "evidence_id": "knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop",
+        "title": "Startup Latency Increase SOP",
+        "source_category": "troubleshooting_sop"
+      },
+      {
+        "evidence_id": "knowledge:media-qoe-metrics::04-failed-session-count",
+        "title": "Failed Session Count / 失败会话数",
+        "source_category": "qoe_metric"
+      }
+    ],
+    "limitation_ids": [
+      "limitation:correlation_not_causation",
+      "limitation:missing_trace_data",
+      "limitation:missing_origin_metrics",
+      "limitation:missing_routing_change_records",
+      "limitation:limited_time_windows"
+    ]
+  },
+  "grouped_comparison": [
+    {
+      "dimension": "cdn",
+      "group": "CDN-A",
+      "metric": "playback_success_rate",
+      "baseline_window": "previous_window",
+      "baseline_value": 0.95,
+      "current_window": "current_window",
+      "current_value": 0.85,
+      "delta": -0.09999999999999998,
+      "relative_change": -0.10526315789473682,
+      "classification": "declined",
+      "is_largest_decline": false,
+      "filters": {
+        "region": "华南"
+      }
+    },
+    {
+      "dimension": "cdn",
+      "group": "CDN-B",
+      "metric": "playback_success_rate",
+      "baseline_window": "previous_window",
+      "baseline_value": 0.95,
+      "current_window": "current_window",
+      "current_value": 0.5,
+      "delta": -0.44999999999999996,
+      "relative_change": -0.47368421052631576,
+      "classification": "declined",
+      "is_largest_decline": true,
+      "filters": {
+        "region": "华南"
+      }
+    },
+    {
+      "dimension": "cdn",
+      "group": "CDN-C",
+      "metric": "playback_success_rate",
+      "baseline_window": "previous_window",
+      "baseline_value": 0.9,
+      "current_window": "current_window",
+      "current_value": 0.8,
+      "delta": -0.09999999999999998,
+      "relative_change": -0.11111111111111108,
+      "classification": "declined",
+      "is_largest_decline": false,
+      "filters": {
+        "region": "华南"
+      }
+    }
+  ],
+  "final_claims": [
+    {
+      "bundle_id": "bundle:regional:华南:cdn",
+      "claim_type": "observation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:overall"
+      ]
+    },
+    {
+      "bundle_id": "bundle:multi_group:华南:cdn",
+      "claim_type": "observation",
+      "predicate": "stable_control",
+      "polarity": "negative",
+      "subject_evidence_ids": [
+        "data:comparison:1:group:1",
+        "data:comparison:1:group:2",
+        "data:comparison:1:group:3"
+      ],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:1",
+        "data:comparison:1:group:2",
+        "data:comparison:1:group:3"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "observation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4"
+      ]
+    },
+    {
+      "bundle_id": "bundle:scope:1",
+      "claim_type": "observation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:status:1"
+      ]
+    },
+    {
+      "bundle_id": "bundle:global:knowledge",
+      "claim_type": "knowledge",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "knowledge:media-qoe-metrics::01-playback-success-rate",
+        "knowledge:media-qoe-metrics::04-failed-session-count"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "correlation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4",
+        "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "limitation:correlation_not_causation",
+        "limitation:missing_trace_data"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "hypothesis",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4",
+        "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "limitation:correlation_not_causation",
+        "limitation:missing_origin_metrics"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "hypothesis",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4",
+        "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "limitation:correlation_not_causation",
+        "limitation:missing_routing_change_records"
+      ]
+    },
+    {
+      "bundle_id": "bundle:regional:华南:cdn",
+      "claim_type": "recommendation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:overall",
+        "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop",
+        "limitation:missing_origin_metrics",
+        "limitation:missing_routing_change_records",
+        "limitation:limited_time_windows"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "recommendation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4",
+        "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "limitation:missing_trace_data",
+        "limitation:missing_origin_metrics",
+        "limitation:missing_routing_change_records"
+      ]
+    }
+  ],
+  "claim_evidence_mapping": [
+    {
+      "bundle_id": "bundle:regional:华南:cdn",
+      "claim_type": "observation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:overall"
+      ]
+    },
+    {
+      "bundle_id": "bundle:multi_group:华南:cdn",
+      "claim_type": "observation",
+      "predicate": "stable_control",
+      "polarity": "negative",
+      "subject_evidence_ids": [
+        "data:comparison:1:group:1",
+        "data:comparison:1:group:2",
+        "data:comparison:1:group:3"
+      ],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:1",
+        "data:comparison:1:group:2",
+        "data:comparison:1:group:3"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "observation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4"
+      ]
+    },
+    {
+      "bundle_id": "bundle:scope:1",
+      "claim_type": "observation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:status:1"
+      ]
+    },
+    {
+      "bundle_id": "bundle:global:knowledge",
+      "claim_type": "knowledge",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "knowledge:media-qoe-metrics::01-playback-success-rate",
+        "knowledge:media-qoe-metrics::04-failed-session-count"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "correlation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4",
+        "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "limitation:correlation_not_causation",
+        "limitation:missing_trace_data"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "hypothesis",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4",
+        "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "limitation:correlation_not_causation",
+        "limitation:missing_origin_metrics"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "hypothesis",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4",
+        "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "limitation:correlation_not_causation",
+        "limitation:missing_routing_change_records"
+      ]
+    },
+    {
+      "bundle_id": "bundle:regional:华南:cdn",
+      "claim_type": "recommendation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:overall",
+        "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop",
+        "limitation:missing_origin_metrics",
+        "limitation:missing_routing_change_records",
+        "limitation:limited_time_windows"
+      ]
+    },
+    {
+      "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+      "claim_type": "recommendation",
+      "predicate": "general",
+      "polarity": "neutral",
+      "subject_evidence_ids": [],
+      "supporting_evidence_ids": [
+        "data:comparison:1:group:2",
+        "data:tool-result:4",
+        "data:result:4",
+        "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "limitation:missing_trace_data",
+        "limitation:missing_origin_metrics",
+        "limitation:missing_routing_change_records"
+      ]
+    }
+  ],
+  "final_validator_result": {
+    "valid": true,
+    "violations": [],
+    "retry_count": 0,
+    "projection_guard_valid": true,
+    "bundle_guard_valid": true,
+    "bundle_violations": [],
+    "validated_against": "full_evidence_pack"
+  },
+  "evidence_projection_summary": {
+    "version": "1.0",
+    "scope_count": 7,
+    "visible_ids": {
+      "data_evidence": [
+        "data:comparison:1:overall",
+        "data:comparison:1:group:1",
+        "data:comparison:1:group:2",
+        "data:comparison:1:group:3",
+        "data:status:1",
+        "data:tool-result:1",
+        "data:result:1",
+        "data:tool-result:4",
+        "data:result:4"
+      ],
+      "knowledge_evidence": [
+        "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+        "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+        "knowledge:media-qoe-metrics::01-playback-success-rate",
+        "knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop",
+        "knowledge:media-qoe-metrics::04-failed-session-count"
+      ],
+      "limitations": [
+        "limitation:correlation_not_causation",
+        "limitation:missing_trace_data",
+        "limitation:missing_origin_metrics",
+        "limitation:missing_routing_change_records",
+        "limitation:limited_time_windows"
+      ]
+    },
+    "evidence_bundles": [
+      {
+        "bundle_id": "bundle:regional:华南:cdn",
+        "bundle_type": "regional",
+        "scope": {
+          "cdn": "ALL",
+          "region": "华南",
+          "windows": [
+            "current_window",
+            "previous_window"
+          ]
+        },
+        "allowed_evidence_ids": [
+          "data:comparison:1:overall",
+          "data:comparison:1:group:1",
+          "data:comparison:1:group:2",
+          "data:comparison:1:group:3"
+        ],
+        "allowed_knowledge_ids": [
+          "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+          "knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop"
+        ],
+        "allowed_limitation_ids": [
+          "limitation:missing_origin_metrics",
+          "limitation:missing_routing_change_records",
+          "limitation:limited_time_windows"
+        ],
+        "supported_claim_types": [
+          "observation",
+          "hypothesis",
+          "recommendation"
+        ],
+        "target_entities": {
+          "cdn": [
+            "CDN-A",
+            "CDN-B",
+            "CDN-C"
+          ]
+        },
+        "provenance": "v1"
+      },
+      {
+        "bundle_id": "bundle:multi_group:华南:cdn",
+        "bundle_type": "multi_group",
+        "scope": {
+          "cdn": "ALL",
+          "region": "华南",
+          "windows": [
+            "current_window",
+            "previous_window"
+          ]
+        },
+        "allowed_evidence_ids": [
+          "data:comparison:1:group:1",
+          "data:comparison:1:group:2",
+          "data:comparison:1:group:3"
+        ],
+        "allowed_knowledge_ids": [],
+        "allowed_limitation_ids": [],
+        "supported_claim_types": [
+          "observation"
+        ],
+        "target_entities": {
+          "cdn": [
+            "CDN-A",
+            "CDN-B",
+            "CDN-C"
+          ]
+        },
+        "provenance": "v1"
+      },
+      {
+        "bundle_id": "bundle:entity:华南:cdn:CDN-B",
+        "bundle_type": "entity",
+        "scope": {
+          "cdn": "CDN-B",
+          "region": "华南",
+          "windows": [
+            "current_window",
+            "previous_window"
+          ]
+        },
+        "allowed_evidence_ids": [
+          "data:comparison:1:group:2",
+          "data:tool-result:4",
+          "data:result:4"
+        ],
+        "allowed_knowledge_ids": [
+          "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+          "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+          "knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop"
+        ],
+        "allowed_limitation_ids": [
+          "limitation:correlation_not_causation",
+          "limitation:missing_trace_data",
+          "limitation:missing_origin_metrics",
+          "limitation:missing_routing_change_records"
+        ],
+        "supported_claim_types": [
+          "observation",
+          "correlation",
+          "hypothesis",
+          "recommendation",
+          "causal_claim"
+        ],
+        "target_entities": {
+          "cdn": [
+            "CDN-B"
+          ]
+        },
+        "provenance": "v1"
+      },
+      {
+        "bundle_id": "bundle:scope:1",
+        "bundle_type": "scope",
+        "scope": {
+          "cdn": "ALL",
+          "error_code": "E302",
+          "group_dimensions": [],
+          "level": "ALL",
+          "region": "华南",
+          "severity": "ALL",
+          "windows": [
+            "current_window"
+          ]
+        },
+        "allowed_evidence_ids": [
+          "data:status:1"
+        ],
+        "allowed_knowledge_ids": [
+          "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+          "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+          "knowledge:media-qoe-metrics::01-playback-success-rate",
+          "knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop",
+          "knowledge:media-qoe-metrics::04-failed-session-count"
+        ],
+        "allowed_limitation_ids": [
+          "limitation:correlation_not_causation",
+          "limitation:missing_trace_data",
+          "limitation:missing_origin_metrics",
+          "limitation:missing_routing_change_records",
+          "limitation:limited_time_windows"
+        ],
+        "supported_claim_types": [
+          "observation",
+          "knowledge",
+          "correlation",
+          "hypothesis",
+          "recommendation",
+          "causal_claim"
+        ],
+        "target_entities": {
+          "region": [
+            "华南"
+          ]
+        },
+        "provenance": "v1"
+      },
+      {
+        "bundle_id": "bundle:scope:2",
+        "bundle_type": "scope",
+        "scope": {
+          "cdn": "ALL",
+          "error_code": "ALL",
+          "group_dimensions": [
+            "region",
+            "window_name"
+          ],
+          "level": "ALL",
+          "region": "华南",
+          "severity": "ALL",
+          "windows": [
+            "current_window",
+            "previous_window"
+          ]
+        },
+        "allowed_evidence_ids": [
+          "data:tool-result:1",
+          "data:result:1"
+        ],
+        "allowed_knowledge_ids": [
+          "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+          "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+          "knowledge:media-qoe-metrics::01-playback-success-rate",
+          "knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop",
+          "knowledge:media-qoe-metrics::04-failed-session-count"
+        ],
+        "allowed_limitation_ids": [
+          "limitation:correlation_not_causation",
+          "limitation:missing_trace_data",
+          "limitation:missing_origin_metrics",
+          "limitation:missing_routing_change_records",
+          "limitation:limited_time_windows"
+        ],
+        "supported_claim_types": [
+          "observation",
+          "knowledge",
+          "correlation",
+          "hypothesis",
+          "recommendation",
+          "causal_claim"
+        ],
+        "target_entities": {
+          "region": [
+            "华南"
+          ]
+        },
+        "provenance": "v1"
+      },
+      {
+        "bundle_id": "bundle:global:knowledge",
+        "bundle_type": "global_knowledge",
+        "scope": {},
+        "allowed_evidence_ids": [],
+        "allowed_knowledge_ids": [
+          "knowledge:media-troubleshooting-sop::01-cdn-playback-success-degradation-sop",
+          "knowledge:media-error-codes::01-e302-cdn-upstream-timeout",
+          "knowledge:media-qoe-metrics::01-playback-success-rate",
+          "knowledge:media-troubleshooting-sop::02-startup-latency-increase-sop",
+          "knowledge:media-qoe-metrics::04-failed-session-count"
+        ],
+        "allowed_limitation_ids": [],
+        "supported_claim_types": [
+          "knowledge"
+        ],
+        "target_entities": {},
+        "provenance": "v1"
+      }
+    ]
+  },
+  "evidence_projection_stats": {
+    "full_evidence_pack_chars": 32710,
+    "projected_evidence_chars": 13282,
+    "max_projection_chars": 13300,
+    "data_chars": 4467,
+    "knowledge_chars": 2027,
+    "limitation_chars": 835,
+    "scope_chars": 1083,
+    "bundle_chars": 4511,
+    "bundle_metadata_chars": 4511,
+    "sample_chars": 0,
+    "compression_ratio": 0.40605319474166923,
+    "comparison_records_before_dedup": 1,
+    "comparison_count_before_dedup": 4,
+    "canonical_comparison_count": 4,
+    "duplicate_comparison_count_removed": 0,
+    "overall_before_dedup": 1,
+    "overall_after_dedup": 1,
+    "group_before_dedup": 3,
+    "group_after_dedup": 3,
+    "provenance_sources_retained": 4,
+    "projection_omitted_fields": [
+      "data_evidence.facts.full_sample_events",
+      "data_evidence.facts.provenance",
+      "data_evidence.source_evidence_ids",
+      "data_evidence.statement",
+      "inference_policy.rule",
+      "knowledge_evidence.full_supported_statement",
+      "knowledge_evidence.source_identifiers",
+      "reviewed_evidence.full_lineage"
+    ],
+    "omitted_evidence_ids": [
+      "data:result:3"
+    ],
+    "fixed_prompt_chars": 5500,
+    "analyst_context_chars": 194,
+    "final_prompt_chars": 18782,
+    "budget_limit": 20000,
+    "budget_remaining": 1218,
+    "available_evidence_budget": 13300,
+    "safety_margin_chars": 1200,
+    "prompt_attempt_chars": [
+      18782
+    ]
+  },
+  "session_commit_status": "committed",
+  "llm_call_count": 14,
+  "component_call_counts": {
+    "analyst": 1,
+    "final_answer": 1,
+    "planner": 1,
+    "reviewer": 7,
+    "session_memory": 1,
+    "sql_agent": 3
+  },
+  "technical_retry": 0,
+  "semantic_retry": 3,
+  "structured_output_retry": {
+    "total": 0,
+    "by_event": {
+      "PLANNER_RETRY": 0,
+      "REVIEW_OUTPUT_RETRY": 0,
+      "ANALYST_OUTPUT_RETRY": 0
+    }
+  },
+  "wall_latency_ms": 126759.53439995646,
+  "component_latency_ms": {
+    "llm": {
+      "analyst": 10633.270499994978,
+      "final_answer": 43240.78780016862,
+      "planner": 16625.96489978023,
+      "reviewer": 31557.152800029144,
+      "session_memory": 2131.327500101179,
+      "sql_agent": 21006.71049999073
+    },
+    "planner": 16626.42850005068,
+    "sql_agent": 21196.50120008737,
+    "tool_router": 6.309199845418334,
+    "tool_execution": 254.99119982123375,
+    "reviewer": 31559.600699692965,
+    "analyst": 10640.87410015054,
+    "final_answer": 43255.63749996945,
+    "retrieval": 3.032500157132745
+  },
+  "trace_summary": {
+    "trace_id": "1281819b-0d7c-463a-b0cb-910748eda8e0",
+    "total_duration_ms": 126759.33600000001,
+    "planner_duration_ms": 16626.42850005068,
+    "sql_agent_duration_ms": 21196.50120008737,
+    "reviewer_duration_ms": 31559.600699692965,
+    "analyst_duration_ms": 10640.87410015054,
+    "final_answer_duration_ms": 43255.63749996945,
+    "sql_query_count": 3,
+    "review_count": 7,
+    "technical_retry_count": 0,
+    "semantic_retry_count": 3,
+    "follow_up_resolution_count": 0,
+    "task_count": 7,
+    "completed_task_count": 7,
+    "failed_task_count": 0,
+    "success": true,
+    "llm_call_count": null,
+    "token_usage": null,
+    "tool_router_duration_ms": 6.309199845418334,
+    "tool_execution_duration_ms": 254.99119982123375,
+    "tool_call_count": 4,
+    "tool_fallback_count": 0
+  }
+}

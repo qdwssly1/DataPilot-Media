@@ -1,0 +1,12 @@
+alarm_id,timestamp,window_name,region,cdn,error_code,severity,status,message
+alarm-py-001,2025-09-01 11:20:00,prior_year,华东,CDN-A,I101,low,resolved,Routine edge health notification recovered automatically.
+alarm-pd-001,2026-08-31 11:42:00,previous_day,华南,CDN-C,W201,medium,resolved,Transient edge latency exceeded the warning threshold.
+alarm-prev-001,2026-09-01 10:28:00,previous_window,华南,CDN-B,I101,low,resolved,Routine edge health notification recovered automatically.
+alarm-prev-002,2026-09-01 10:35:00,previous_window,华东,CDN-A,W110,low,resolved,Short-lived origin latency warning cleared within five minutes.
+alarm-cur-001,2026-09-01 11:06:00,current_window,华南,CDN-B,E302,high,open,CDN upstream request timeout rate exceeded the critical threshold.
+alarm-cur-002,2026-09-01 11:18:00,current_window,华南,CDN-B,E302,high,investigating,CDN edge nodes continued reporting upstream request timeouts.
+alarm-cur-003,2026-09-01 11:34:00,current_window,华南,CDN-B,E302,high,resolved,CDN upstream timeout alarm remained above the recovery threshold.
+alarm-cur-004,2026-09-01 11:24:00,current_window,华南,CDN-C,W201,medium,investigating,Edge latency exceeded the warning threshold.
+alarm-cur-005,2026-09-01 11:40:00,current_window,华南,CDN-A,I101,low,resolved,Routine edge health notification recovered automatically.
+alarm-cur-006,2026-09-01 11:16:00,current_window,华东,CDN-B,W110,medium,resolved,Short-lived origin latency warning cleared within five minutes.
+alarm-cur-007,2026-09-01 11:22:00,current_window,华北,CDN-A,I101,low,resolved,Routine edge health notification recovered automatically.

@@ -16,6 +16,8 @@ from datapilot.agent.state import (
     TaskItem,
     get_effective_query,
 )
+from datapilot.tools.integration import task_evidence_metadata
+from datapilot.retrieval.integration import compact_knowledge_evidence
 from datapilot.tools.wren_tools import WrenQueryResult
 from datapilot.tracing.trace import EventType, TraceCollector
 
@@ -114,11 +116,17 @@ class SQLExecutionError(SQLAgentError):
 SQL_SYSTEM_PROMPT = """You are DataPilot's SQL Agent.
 Generate exactly one read-only SQL query for the current task.
 Use only the supplied Wren context, relevant schema, and verified query examples.
+Retrieved knowledge may clarify a metric definition or diagnostic term, but it is
+not schema and not data evidence. Never create a table, column, filter value, or
+observed event from knowledge text; Wren context remains authoritative for SQL.
 The original current TaskItem is authoritative. Reviewer feedback may correct SQL
 but must never broaden, replace, or merge its task contract with sibling tasks.
 Preserve every authoritative semantic filter value exactly as provided. Do not
 translate categorical literals. A different value is allowed only when the supplied
 Wren context contains an explicit canonical mapping for that filter and value.
+When a task asks for categorical evidence such as status, severity, or error code,
+preserve each value and its count (or return individual rows). Never use MIN/MAX on
+a categorical field to make one value represent multiple records.
 Do not answer the user, invent data, modify data, or emit Markdown code fences.
 Return one JSON object that exactly matches the supplied schema.
 The sql field must contain SQL only; summary must be a short observable description.
@@ -744,6 +752,7 @@ class SQLAgent:
                     semantic_retry_count=semantic_retry_count,
                     execution_time=perf_counter() - started_at,
                     context_summary=context_summary,
+                    tool_metadata=task_evidence_metadata(task),
                 )
                 self._update_state(state, task, result)
                 self._add_event(
@@ -836,6 +845,9 @@ class SQLAgent:
             "description": task.description,
             "task_type": task.task_type,
             "depends_on": task.depends_on,
+            "metric_binding": task.metric_binding,
+            "requested_dimensions": task.requested_dimensions,
+            "window_role_binding": task.window_role_binding,
         }
         prompt = (
             f"Effective user query:\n{get_effective_query(state)}\n\n"
@@ -846,7 +858,10 @@ class SQLAgent:
             f"{_compact_json(authoritative_filters, max_chars=2000)}\n\n"
             f"Wren context:\n{_compact_json(context, max_chars=8000)}\n\n"
             "Historical verified queries:\n"
-            f"{_compact_json(recalled_queries, max_chars=4000)}"
+            f"{_compact_json(recalled_queries, max_chars=4000)}\n\n"
+            "Retrieved knowledge evidence (advisory semantics/SOP only; never "
+            "database evidence):\n"
+            f"{_compact_json(compact_knowledge_evidence(state), max_chars=5000)}"
         )
         if semantic_feedback is not None and previous_result is not None:
             issues = [
@@ -928,6 +943,7 @@ class SQLAgent:
             semantic_retry_count=semantic_retry_count,
             execution_time=perf_counter() - started_at,
             context_summary=context_summary,
+            tool_metadata=task_evidence_metadata(task),
         )
         task.status = "pending"
         state["current_task"] = task

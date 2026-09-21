@@ -69,5 +69,9 @@ local_cache/
 .tmp/
 .tmp
 
+# ---- DataPilot-Media reproducible runtime artifacts ----
+# Rebuild from domains/media/data/generate_data.py; keep the CSV fixtures.
+domains/media/data/media.duckdb
+
 # ---- Claude Code worktrees (local dev only) ----
 **/.claude/worktrees/

@@ -1,0 +1,3 @@
+datasource: duckdb
+url: ${MEDIA_DUCKDB_DIR}
+format: duckdb

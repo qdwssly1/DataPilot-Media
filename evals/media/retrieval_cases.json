@@ -1,0 +1,77 @@
+[
+  {
+    "id": "metric-playback-success-formula",
+    "query": "播放成功率怎么计算？",
+    "expected_chunk_ids": ["media-qoe-metrics::01-playback-success-rate"]
+  },
+  {
+    "id": "metric-ratio-aggregation",
+    "query": "Can I average pre-aggregated playback success ratios across CDNs?",
+    "expected_chunk_ids": ["media-qoe-metrics::01-playback-success-rate"]
+  },
+  {
+    "id": "metric-rebuffer",
+    "query": "卡顿率的分子分母和聚合规则是什么？",
+    "expected_chunk_ids": ["media-qoe-metrics::02-rebuffer-ratio"]
+  },
+  {
+    "id": "metric-startup-p95",
+    "query": "首帧耗时 P95 可以把各区域 P95 平均吗？",
+    "expected_chunk_ids": ["media-qoe-metrics::03-startup-time-and-startup-time-p95"]
+  },
+  {
+    "id": "metric-failed-sessions",
+    "query": "failed session count 是什么，流量变化时怎么看？",
+    "expected_chunk_ids": ["media-qoe-metrics::04-failed-session-count"]
+  },
+  {
+    "id": "error-e302",
+    "query": "E302 是什么？",
+    "expected_chunk_ids": ["media-error-codes::01-e302-cdn-upstream-timeout"]
+  },
+  {
+    "id": "error-e401",
+    "query": "播放鉴权 E401 常见触发条件",
+    "expected_chunk_ids": ["media-error-codes::02-e401-token-or-playback-authorization-rejected"]
+  },
+  {
+    "id": "error-e503",
+    "query": "How is E503 different from an upstream timeout?",
+    "expected_chunk_ids": ["media-error-codes::03-e503-origin-or-service-unavailable", "media-error-codes::01-e302-cdn-upstream-timeout"]
+  },
+  {
+    "id": "sop-cdn-degradation",
+    "query": "华南 CDN 播放成功率下降应该怎么排查？",
+    "expected_chunk_ids": ["media-troubleshooting-sop::01-cdn-playback-success-degradation-sop"]
+  },
+  {
+    "id": "sop-startup",
+    "query": "time to first frame 变慢应该检查什么？",
+    "expected_chunk_ids": ["media-troubleshooting-sop::02-startup-latency-increase-sop"]
+  },
+  {
+    "id": "sop-rebuffer",
+    "query": "rebuffer ratio increase troubleshooting steps",
+    "expected_chunk_ids": ["media-troubleshooting-sop::03-rebuffer-ratio-increase-sop"]
+  },
+  {
+    "id": "sop-causality",
+    "query": "同期告警和 QoE 下降重合能证明因果吗？",
+    "expected_chunk_ids": ["media-troubleshooting-sop::04-alarm-correlation-and-evidence-rules"]
+  },
+  {
+    "id": "codec-comparison",
+    "query": "H.264 H.265 AV1 的兼容性和编码成本取舍",
+    "expected_chunk_ids": ["media-codec-transcoding::01-h-264-h-265-and-av1-trade-offs"]
+  },
+  {
+    "id": "transcode-input",
+    "query": "转码任务输入无法读取时先检查什么？",
+    "expected_chunk_ids": ["media-codec-transcoding::02-transcoding-pipeline-stages", "media-error-codes::04-t100-transcode-job-input-unreadable"]
+  },
+  {
+    "id": "unrelated-expense",
+    "query": "员工差旅报销政策是什么？",
+    "expected_chunk_ids": []
+  }
+]

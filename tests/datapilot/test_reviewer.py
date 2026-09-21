@@ -312,6 +312,30 @@ def test_reviewer_structured_output_retry() -> None:
     }
 
 
+def test_reviewer_bounds_verbose_text_without_changing_decision() -> None:
+    state, task, result, trace = _executed_state()
+    payload = json.dumps(
+        {
+            "decision": "approve",
+            "reason_summary": "verified " * 80,
+            "issues": [],
+            "retry_instruction": None,
+            "confidence": 0.95,
+        }
+    )
+
+    review = Reviewer(model_client=FakeModel([payload])).review(
+        state,
+        task,
+        result,
+        trace=trace,
+    )
+
+    assert review.decision == "approve"
+    assert len(review.reason_summary) == 240
+    assert task.status == "completed"
+
+
 def test_reviewer_fails_after_invalid_output_retry() -> None:
     state, task, result, trace = _executed_state()
 

@@ -1,258 +1,234 @@
-# DataPilot
+# DataPilot-Media
 
-DataPilot is a multi-step data analysis Agent built on top of WrenAI v0.13.3's
-semantic, context, and execution capabilities. It adds an explicit, testable
-application layer for planning, SQL orchestration, semantic review, bounded
-correction, deterministic analysis, grounded answers, and structured multi-turn
-memory.
+DataPilot-Media is a multi-step analysis agent for audio/video quality analysis
+and incident troubleshooting. It extends the DataPilot runtime with a synthetic
+Media domain and combines schema-grounded planning, read-only Tool Calling,
+Knowledge RAG, evidence validation, and deterministic rendering to produce
+traceable answers.
 
-> Status: resume-freeze candidate. The current checkout is a source-level
-> engineering project, not a production service or packaged DataPilot release.
+> Project status: completed experimental prototype. The current evaluation uses
+> deterministic synthetic Media data and a limited number of real-model runs; it
+> is not a production monitoring platform.
 
-## Overview
+## Why this project
 
-DataPilot turns a natural-language analysis request into a dependency-aware task
-plan. Query tasks use Wren's context, verified SQL memory, semantic planner, and
-database connector; every query result then passes a separate semantic Reviewer.
-Only approved results can reach deterministic analysis and the final answer.
-Successful turns commit compact session context for follow-up questions.
+Executable SQL is not enough for incident analysis. A query can run while using
+the wrong metric, time window, filter, aggregation, or evidence scope. A language
+model can also turn correlation into an unsupported causal claim. DataPilot-Media
+makes those boundaries explicit:
 
-The ownership boundary is deliberate:
+- the Planner sees a lightweight schema/capability context before decomposing a
+  request;
+- deterministic Media tools and Wren/DuckDB provide read-only data evidence;
+- the Reviewer can request one bounded SQL correction without discarding valid
+  Tool evidence;
+- Knowledge RAG supplies metric definitions, error-code meaning, and SOP steps;
+- evidence is normalized, deduplicated, scoped, and validated before rendering;
+- Session Memory is committed only after the complete workflow succeeds.
 
-- **DataPilot Agent layer:** state, planning, dispatch, safety, retry, review,
-  analysis, answers, session memory, tracing, and offline evaluation.
-- **WrenAI layer:** MDL semantic model, context retrieval, SQL memory,
-  dry plan, Wren Engine, and connectors.
+## Features
 
-## Why DataPilot
-
-Ordinary text-to-SQL pipelines often stop when SQL executes. Execution proves
-that a database accepted the statement; it does not prove that the selected
-metric, dimensions, filters, aggregation, or time range match the user's task.
-DataPilot makes those contracts explicit and independently reviewable.
+- Schema-grounded planning over Media models, dimensions, metrics, and tools.
+- Wren semantic modeling backed by a deterministic DuckDB fixture.
+- Four read-only Media tools: QoE metrics, alarms, structured logs, and transcode
+  status.
+- Deterministic Tool Router with bounded SQL fallback/correction.
+- Stdio MCP exposure of the same validated Tool contracts.
+- Heading-aware Media knowledge corpus with BM25, local concept-aware feature
+  hashing, hybrid reciprocal-rank fusion, and deterministic reranking.
+- Paired baseline/current normalization across multiple Planner shapes.
+- Canonical comparison deduplication with provenance retention and fail-closed
+  conflict handling.
+- Full Evidence Pack as the local canonical source of truth.
+- Compact Evidence Projection and deterministic scope-aware bundles for the
+  Final Claims LLM.
+- Typed claims: observation, knowledge, correlation, hypothesis,
+  recommendation, and causal claim.
+- Projection, bundle, numeric, causal, mixed-status, bounded-sample, scope, and
+  stable-control guards.
+- Deterministic final renderer with DATA EVIDENCE, KNOWLEDGE EVIDENCE,
+  INFERENCE, and LIMITATION sections.
 
 ## Architecture
 
-~~~mermaid
+```mermaid
 flowchart TD
-    U[User / multi-turn CLI]
+    U[User Question] --> P[Schema-Grounded Planner]
+    P --> D[Task Dispatcher]
+    D --> R[Deterministic Tool Router]
+    R --> MT[Media Tools]
+    R --> SQL[SQL Agent / bounded fallback]
+    MT --> REV[Semantic Reviewer]
+    SQL --> W[Wren dry-plan / DuckDB]
+    W --> REV
+    REV --> KR[Knowledge Retrieval]
+    KR --> EN[Evidence Normalization]
+    EN --> CD[Canonical Evidence Dedup]
+    CD --> FP[Full Evidence Pack]
+    FP --> CP[Compact Evidence Projection]
+    CP --> SB[Scope-Aware Bundles]
+    SB --> SC[Typed Structured Claims]
+    SC --> PG[Projection Visibility Guard]
+    PG --> BG[Bundle Guard]
+    BG --> FV[Full-Pack Validator]
+    FV --> DR[Deterministic Renderer]
+    DR --> FA[Final Answer]
+    FA --> SM[Success-only Session Memory]
+    FP -. local canonical source of truth .-> FV
+```
 
-    subgraph DP[DataPilot Agent Layer]
-        SM[Structured Session Memory]
-        FR[Follow-up Resolver]
-        P[Structured Planner]
-        D[Task Dispatcher]
-        S[SQL Agent + Safety]
-        R[Semantic Reviewer]
-        A[Deterministic Analyst]
-        F[Grounded Final Answer]
-        T[Trace Summary + Offline Eval]
-    end
+The Full Evidence Pack remains local. The Final Claims LLM sees only the
+bounded Compact Projection and bundle metadata; the final Validator checks its
+claims against the Full Evidence Pack.
 
-    subgraph W[WrenAI Layer]
-        WT[Wren Toolkit]
-        C[Context Retrieval + SQL Memory]
-        E[MDL / Dry Plan / Wren Engine]
-        DB[Connector / Database]
-    end
+## Media domain
 
-    U --> P
-    P -- follow_up --> SM --> FR --> P
-    P --> D --> S
-    S --> WT --> C --> E --> DB
-    DB --> R
-    R -- one bounded semantic correction --> S
-    R -- approve --> A --> F
-    F -- success only --> SM
-    DP -. observable events .-> T
-~~~
+The project under `domains/media/` contains four synthetic models:
 
-## Core Workflow
-
-**Plan → Query → Review → Correct → Analyze → Answer → Remember**
-
-Planner output is strict JSON with unique task IDs and valid dependencies.
-The dispatcher runs ready tasks in plan order: query tasks go through SQL
-generation and review, analysis tasks consume approved SQL results, and
-response tasks write a grounded answer.
-
-## Key Features
-
-- Explicit AgentState, rather than hiding workflow state in chat messages.
-- Structured Planner with simple-question, single-query, multi-step-analysis,
-  and follow-up intents.
-- Dependency-aware query, analysis, and response tasks.
-- Wren context retrieval, verified NL-to-SQL recall, semantic planning, and
-  connector execution through a thin adapter.
-- Read-only SQL safety and authoritative categorical-filter preservation.
-- Technical retry and semantic correction with fixed upper bounds.
-- Per-task semantic Reviewer and SQL-memory write only after approval.
-- Deterministic grouped differences, growth rates, and largest-decline logic.
-- Structured session slots with inheritance, override, isolation, reset, and
-  poisoning protection.
-- In-memory trace events, compact CLI run summaries, and a repeatable offline
-  Eval.
-
-## Reliability Design
-
-| Risk | Boundary |
+| Model | Purpose |
 |---|---|
-| Invalid model output | Strict JSON fields and one bounded format retry |
-| Unsafe SQL | Read-only/single-statement checks before Wren |
-| Invalid semantic SQL | Wren dry plan before query execution |
-| Transient planning/query failure | SQL Agent has at most two attempts |
-| Executable but wrong SQL | Reviewer checks the current Planner task contract |
-| Reviewer finds a semantic mismatch | At most one Reviewer → SQL correction |
-| LLM arithmetic error | Numeric comparison is deterministic Python |
-| Unsupported result shape | Analyst fails closed on ambiguous metric contracts |
-| Ungrounded response | Final answer source IDs must reference completed outputs |
-| Incorrect translated category | User filter literal is authoritative unless Wren supplies a canonical mapping |
-| Failed turn corrupts follow-ups | Session context is committed only after the complete turn succeeds |
-| Infinite agent loop | Planner, resolver, output, technical, and semantic retries are bounded |
+| `stream_sessions` | Playback attempts and QoE measurements |
+| `alarm_events` | Operational alarms with mixed lifecycle states |
+| `log_events` | Structured CDN/origin log evidence |
+| `transcode_jobs` | Synthetic transcode status records |
 
-Token usage and cost are not currently collected; the project does not invent
-those metrics.
+The fixture includes `prior_year`, `previous_day`, `previous_window`, and
+`current_window`. Its deliberate incident is a 华南 / CDN-B playback-success
+drop accompanied by three high-severity E302 alarms whose states are `open`,
+`investigating`, and `resolved`.
 
-## Multi-turn Session Example
+## Quick start
 
-All values below are synthetic.
+Python 3.11 or newer is required. The commands below are for PowerShell and
+must be run from the repository root.
 
-**Turn 1**
-
-> 比较 Q2 和 Q3 各商品类别 GMV，并找出下降最大的类别。
-
-| Category | Q2 GMV | Q3 GMV | Change | Growth |
-|---|---:|---:|---:|---:|
-| A | 250 | 200 | -50 | -20% |
-| B | 300 | 370 | +70 | +23.33% |
-
-The deterministic result is **largest decline = A**. After the grounded final
-answer, memory contains metric GMV, time Q2/Q3, dimension 商品类别, no filters,
-and turn index 1.
-
-**Turn 2**
-
-> 那华南地区呢？
-
-The Planner marks this as a follow-up. The resolver inherits the metric,
-dimension, time range, and analysis goal, adds region=华南, and produces a
-standalone query before re-planning. The SQL Agent preserves region = '华南';
-approved synthetic Wren results are analyzed and the session is committed with
-turn index 2.
-
-## Evaluation
-
-The committed offline Eval uses 30 synthetic cases, deterministic fake model
-responses, and FakeWren. It makes no network requests.
-
-| Metric | Measured result |
-|---|---:|
-| Planner intent accuracy | 1.000000 |
-| Planner plan valid rate | 1.000000 |
-| SQL execution success rate | 1.000000 |
-| SQL safety rejection rate | 1.000000 |
-| Reviewer decision accuracy | 1.000000 |
-| Semantic correction success rate | 1.000000 |
-| Analysis numeric accuracy | 1.000000 |
-| Follow-up resolution accuracy | 1.000000 |
-| End-to-end task success rate | 1.000000 |
-| Average technical retries | 0.200000 |
-| Average semantic retries | 0.100000 |
-
-These are application-contract results, not a live-model benchmark. See
-[the generated Eval artifact](docs/EVAL_RESULTS.md) and
-[the Eval design](evals/datapilot/README.md).
-
-## Project Structure
-
-~~~text
-datapilot/
-├── agent/          state, Planner, SQL Agent, Reviewer, Analyst, workflow
-├── llm/            OpenAI-compatible structured-output boundary
-├── memory/         in-memory structured session store
-├── tools/          thin WrenToolkit adapter
-├── tracing/        observable events and run summary
-└── cli.py          multi-turn CLI
-evals/datapilot/    30-case deterministic offline Eval
-tests/datapilot/    unit, contract, workflow, and Eval tests
-core/               upstream WrenAI engine and Python runtime
-sdk/wren-langchain/ upstream WrenAI LangChain/LangGraph toolkit
-~~~
-
-More detail is in [Project Architecture](docs/PROJECT_ARCHITECTURE.md).
-
-## Quick Start
-
-Python 3.11 or newer is required by the Wren packages; this freeze was verified
-with Python 3.13.1 on Windows.
-
-~~~powershell
-py -3.13 -m venv .venv
+```powershell
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .\core\wren
 .\.venv\Scripts\python.exe -m pip install -e ".\sdk\wren-langchain[dev]"
 Copy-Item .env.example .env
-~~~
+```
 
-Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL locally. Point WREN_PROJECT_PATH
-at a prepared Wren project. Never commit .env.
+Keep credentials only in the ignored `.env`. Generate the deterministic data,
+register the environment-variable-based DuckDB profile, and build the Wren
+project:
 
-~~~powershell
+```powershell
+.\.venv\Scripts\python.exe .\domains\media\data\generate_data.py
+$env:MEDIA_DUCKDB_DIR = (Resolve-Path .\domains\media\data).Path
+$env:WREN_HOME = (Resolve-Path .\domains\media\.wren).Path
+.\.venv\Scripts\wren.exe profile add datapilot_media_duckdb `
+  --from-file .\domains\media\profile.yml
+$env:PYTHONUTF8 = "1"
+.\.venv\Scripts\wren.exe context build --path .\domains\media
+.\.venv\Scripts\wren.exe context validate --path .\domains\media
+```
+
+Point DataPilot at the Media project and start the CLI:
+
+```powershell
+$env:WREN_PROJECT_PATH = (Resolve-Path .\domains\media).Path
+$env:WREN_PROFILE = "datapilot_media_duckdb"
 .\.venv\Scripts\python.exe -m datapilot.cli
-~~~
+```
 
-The CLI retains one session across questions. Enter reset or clear to discard
-its context, and exit or quit to stop.
+Demo question:
 
-Run the offline Eval without any LLM credentials:
+> 华南播放成功率下降并出现 E302，结合告警、日志和知识库分析原因，并给出排查建议。
 
-~~~powershell
-.\.venv\Scripts\python.exe evals\datapilot\runner.py
-~~~
+## Evaluation snapshot
 
-## Tests
+Metrics are scoped to the named synthetic evaluation set. They are not
+production accuracy claims.
 
-Final freeze regression on Python 3.13.1:
+| Evaluation | Result |
+|---|---:|
+| `tests/media` | 219 passed |
+| `tests/datapilot` | 190 passed |
+| MCP smoke | 7/7 passed |
+| 18-case Tool Golden Set | selection 1.0 / arguments 1.0 / execution 1.0 |
+| 15-case Retrieval Eval, Hybrid + Rerank | Recall@1 0.9286 / Recall@3 1.0 / MRR@3 1.0 |
+| Single authorized Real DeepSeek E2E | complete workflow passed |
 
-~~~powershell
-.\.venv\Scripts\python.exe -m pytest tests\datapilot -v
-# 179 passed
+The successful Real E2E used 14 LLM calls and completed in approximately
+126.76 seconds. It had zero technical retries, three bounded semantic
+corrections, and zero structured-output retries. The evidence context was
+compressed from 32,710 characters to 13,282 characters; the final prompt used
+18,782 of the 20,000-character budget.
 
-.\.venv\Scripts\python.exe -m pytest sdk\wren-langchain\tests -v -m "not slow"
-# 116 passed, 2 deselected
-~~~
+Reproduce the offline evaluations without calling an external LLM:
 
-The wren-langchain run reports five existing DuckDB fetch-arrow-table
-deprecation warnings.
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\media
+.\.venv\Scripts\python.exe -m pytest tests\datapilot
+.\.venv\Scripts\python.exe -m evals.media.run_tool_eval
+.\.venv\Scripts\python.exe -m evals.media.run_retrieval_eval
+.\.venv\Scripts\python.exe -m evals.media.run_mcp_smoke
+```
 
-## WrenAI Attribution
+See the [final project report](docs/MEDIA_AGENT_FINAL_REPORT.md) for the full
+evaluation matrix and the [Media Eval README](evals/media/README.md) for metric
+definitions and runner boundaries.
 
-This branch is a secondary development based on the official
-[Canner/WrenAI](https://github.com/Canner/WrenAI) v0.13.3 source. WrenAI
-provides the MDL semantic layer, Wren Engine, context retrieval, SQL memory,
-Toolkit, connectors, MCP support, and related SDKs. DataPilot does not present
-those upstream capabilities as original work.
+## Safety and reliability boundaries
 
-Licensing and attribution are preserved in [LICENSE](LICENSE),
-[LICENSE-APACHE-2.0](LICENSE-APACHE-2.0),
-[LICENSE-CC-BY-4.0](LICENSE-CC-BY-4.0), and
-[LICENSE-AGPL-3.0](LICENSE-AGPL-3.0). The repository license map applies by
-path; notably core and sdk are Apache-2.0 and docs is CC BY 4.0.
+| Risk | Boundary |
+|---|---|
+| Hallucinated schema | Lightweight planning context constrains available entities and fields |
+| Unsafe SQL | Read-only, single-statement checks plus Wren dry-plan |
+| Executable but wrong query | Independent semantic Reviewer and one bounded correction |
+| Tool/correction evidence loss | Additive evidence merge with source lineage |
+| Invalid comparison | Explicit metric, unit, aggregation, scope, group, and window bindings |
+| Duplicate evidence | Canonical identity deduplication; conflicting facts fail closed |
+| Context overflow | Deterministic P0/P1/P2 projection under a 20,000-character hard limit |
+| Cross-scope claim | Scope-aware bundles and Bundle Guard |
+| Unsupported fact or cause | Numeric, causal, mixed-status, bounded-sample, and evidence-ID guards |
+| Free-form final hallucination | Structured claims, Full-Pack validation, deterministic renderer |
+| Failed turn poisoning memory | Session Memory commits only after complete success |
 
-## Limitations / Future Work
+Retries and correction loops remain bounded. No runner persists API keys,
+Authorization headers, complete prompts, or raw model responses.
 
-The freeze deliberately leaves these items as future work:
+## Project structure
 
-- persistent Session Store or Redis;
-- persistent trace backend, distributed tracing, and token/cost accounting;
-- broader real connector end-to-end coverage;
-- real LanceDB SQL-memory smoke coverage;
-- production PII and row-level security policy;
-- more complex multi-dimensional deterministic analysis;
-- natural-language numeric-claim validation;
-- production API and frontend;
-- repository pruning.
+```text
+datapilot/
+├── agent/              Planner, workflow, Reviewer, Analyst, evidence pipeline
+├── retrieval/          heading-aware corpus loading and local hybrid retrieval
+├── tools/              contracts, discovery, routing, integration, Wren adapter
+├── memory/             structured success-only session memory
+└── tracing/            bounded trace and run summaries
+domains/media/
+├── models/ views/ cubes/  Wren Media semantic project
+├── data/                   deterministic fixture generator and CSV sources
+├── knowledge/              QoE, error-code, codec, and SOP corpus
+└── runtime/                four Media tools and MCP server
+evals/media/                 Tool, retrieval, MCP, offline-agent, and Real E2E evals
+tests/media/                 Media contracts, guards, workflow, and regression tests
+docs/MEDIA_AGENT_FINAL_REPORT.md
+```
 
-Real LLM evaluation was not run during this Resume Freeze Sprint. Prior
-synthetic-data smoke tests validated the OpenAI-compatible workflow with a real
-DeepSeek model and real Wren/DuckDB, but that evidence is separate from the
-repeatable offline Eval.
+## Known limitations
+
+- The Media dataset and all operational evidence are synthetic.
+- The Tool and Retrieval golden sets are small development evaluations, not
+  held-out production benchmarks.
+- Real-model coverage is intentionally limited; the reported Phase 3 result is
+  one authorized Real DeepSeek E2E run.
+- The semantic retrieval path is deterministic local TF-IDF feature hashing
+  with domain aliases, not a pretrained sentence-embedding model.
+- Real E2E latency is high, and Reviewer/SQL correction increases LLM calls.
+- The project does not process audio/video bytes, run FFmpeg, operate production
+  monitoring infrastructure, implement user permissions, or provide a frontend.
+
+## WrenAI attribution
+
+This branch is secondary development based on the official
+[Canner/WrenAI](https://github.com/Canner/WrenAI) source. Wren supplies the MDL
+semantic layer, Wren Engine, context and memory facilities, connectors, CLI,
+MCP foundations, and SDKs. DataPilot-Media adds an application/domain layer; it
+does not claim to have reimplemented the WrenAI engine.
+
+The repository's existing licenses and path-specific attribution remain in
+effect. See `LICENSE`, `LICENSE-APACHE-2.0`, `LICENSE-CC-BY-4.0`, and
+`LICENSE-AGPL-3.0`.

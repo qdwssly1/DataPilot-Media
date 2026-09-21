@@ -1,0 +1,6 @@
+active: datapilot_media_duckdb
+profiles:
+  datapilot_media_duckdb:
+    datasource: duckdb
+    url: ${MEDIA_DUCKDB_DIR}
+    format: duckdb

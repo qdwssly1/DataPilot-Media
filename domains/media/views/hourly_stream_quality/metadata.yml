@@ -1,0 +1,22 @@
+name: hourly_stream_quality
+statement: |
+  SELECT
+    DATE_TRUNC('hour', timestamp) AS window_start,
+    region,
+    cdn,
+    device,
+    COUNT(*) AS session_count,
+    SUM(CASE WHEN play_success THEN 1 ELSE 0 END) AS successful_sessions,
+    SUM(CASE WHEN play_success THEN 0 ELSE 1 END) AS failed_sessions,
+    CAST(SUM(CASE WHEN play_success THEN 1 ELSE 0 END) AS DOUBLE)
+      / NULLIF(COUNT(*), 0) AS playback_success_rate,
+    AVG(startup_time) AS average_startup_time,
+    SUM(buffer_duration) AS total_buffer_duration,
+    SUM(playback_duration) AS total_playback_duration,
+    SUM(buffer_duration) / NULLIF(SUM(playback_duration), 0) AS rebuffer_ratio
+  FROM stream_sessions
+  GROUP BY DATE_TRUNC('hour', timestamp), region, cdn, device
+properties:
+  description: >-
+    Hourly playback quality aggregates by region, CDN, and device. Success
+    rate is calculated from session-level numerator and denominator counts.

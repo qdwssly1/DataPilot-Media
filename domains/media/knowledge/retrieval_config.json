@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "domain": "media",
+  "rrf_k": 60,
+  "embedding_dimensions": 256,
+  "metric_concepts": [
+    "playback_success_rate",
+    "rebuffer_ratio",
+    "startup_time",
+    "failed_session_count"
+  ],
+  "semantic_concepts": {
+    "playback_success_rate": ["playback success rate", "play success rate", "播放成功率", "成功播放率"],
+    "rebuffer_ratio": ["rebuffer ratio", "buffering ratio", "卡顿率", "缓冲占比", "卡顿"],
+    "startup_time": ["startup time", "time to first frame", "ttff", "首帧耗时", "起播耗时", "启动延迟"],
+    "failed_session_count": ["failed session count", "play failures", "失败会话数", "播放失败数"],
+    "upstream_timeout": ["upstream timeout", "origin timeout", "上游超时", "源站超时", "回源超时"],
+    "cdn_degradation": ["cdn degradation", "playback success degradation", "cdn incident", "cdn质量下降", "cdn故障", "播放质量下降", "播放成功率下降"],
+    "alarm_correlation": ["alarm correlation", "correlate alarms", "告警关联", "同期告警"],
+    "transcoding": ["transcoding", "transcode", "转码", "编码转换"],
+    "codec": ["codec", "h.264", "h.265", "av1", "编码器", "编解码"]
+  },
+  "category_hints": {
+    "qoe_metric": ["metric", "formula", "指标", "定义", "口径", "怎么计算"],
+    "error_code": ["error code", "错误码", "告警码", "e302", "e401", "e503"],
+    "troubleshooting_sop": ["sop", "troubleshoot", "排查", "检查什么", "怎么办", "建议"],
+    "codec_transcoding": ["codec", "transcode", "编码", "转码", "h.264", "h.265", "av1"]
+  }
+}

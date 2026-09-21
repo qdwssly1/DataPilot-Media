@@ -1,0 +1,64 @@
+name: hourly_alarm_correlation
+statement: |
+  WITH qoe AS (
+    SELECT
+      DATE_TRUNC('hour', timestamp) AS window_start,
+      window_name,
+      region,
+      cdn,
+      COUNT(*) AS session_count,
+      SUM(CASE WHEN play_success THEN 1 ELSE 0 END) AS successful_sessions,
+      AVG(CASE WHEN play_success THEN 1.0 ELSE 0.0 END) AS playback_success_rate,
+      AVG(startup_time) AS average_startup_time,
+      SUM(buffer_duration) AS total_buffer_duration
+    FROM stream_sessions
+    GROUP BY DATE_TRUNC('hour', timestamp), window_name, region, cdn
+  ),
+  alarms AS (
+    SELECT
+      DATE_TRUNC('hour', timestamp) AS window_start,
+      window_name,
+      region,
+      cdn,
+      COUNT(*) AS alarm_count,
+      SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END)
+        AS high_severity_alarm_count,
+      SUM(CASE WHEN status IN ('open', 'investigating') THEN 1 ELSE 0 END)
+        AS active_alarm_count,
+      MAX(CASE WHEN severity = 'high' THEN error_code END)
+        AS representative_high_error_code,
+      MAX(CASE WHEN severity = 'high' THEN message END)
+        AS representative_high_alarm_message
+    FROM alarm_events
+    GROUP BY DATE_TRUNC('hour', timestamp), window_name, region, cdn
+  )
+  SELECT
+    qoe.window_start,
+    qoe.window_name,
+    qoe.region,
+    qoe.cdn,
+    qoe.session_count,
+    qoe.successful_sessions,
+    qoe.playback_success_rate,
+    qoe.average_startup_time,
+    qoe.total_buffer_duration,
+    COALESCE(alarms.alarm_count, 0) AS alarm_count,
+    COALESCE(alarms.high_severity_alarm_count, 0)
+      AS high_severity_alarm_count,
+    COALESCE(alarms.active_alarm_count, 0) AS active_alarm_count,
+    alarms.representative_high_error_code,
+    alarms.representative_high_alarm_message
+  FROM qoe
+  LEFT JOIN alarms
+    ON qoe.window_start = alarms.window_start
+    AND qoe.window_name = alarms.window_name
+    AND qoe.region = alarms.region
+    AND qoe.cdn = alarms.cdn
+properties:
+  description: >-
+    Safe hourly QoE-to-alarm correlation by region and CDN. Both fact tables
+    are aggregated before joining so alarm multiplicity cannot duplicate
+    stream sessions. Alarm overlap indicates a possible cause, not proven
+    causality. This view exposes counts and one representative high-severity
+    code/message; it does not preserve individual alarm lifecycle statuses.
+    Query alarm_events when status distribution or per-alarm evidence is needed.

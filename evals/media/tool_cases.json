@@ -1,0 +1,128 @@
+[
+  {
+    "id": "qoe_current_south",
+    "query": "查询华南当前窗口播放成功率和卡顿情况。",
+    "expected_route": "tool",
+    "expected_tool": "query_qoe_metrics",
+    "expected_arguments": {"windows": ["current_window"], "region": "华南", "primary_metric": "playback_success_rate"}
+  },
+  {
+    "id": "qoe_window_cdn_comparison",
+    "query": "比较上一窗口和当前窗口，按CDN查看播放成功率下降。",
+    "expected_route": "tool",
+    "expected_tool": "query_qoe_metrics",
+    "expected_arguments": {"windows": ["previous_window", "current_window"], "primary_metric": "playback_success_rate", "group_by": ["window_name", "cdn"]}
+  },
+  {
+    "id": "qoe_mobile_startup",
+    "query": "查询当前窗口移动端首帧耗时。",
+    "expected_route": "tool",
+    "expected_tool": "query_qoe_metrics",
+    "expected_arguments": {"windows": ["current_window"], "primary_metric": "average_startup_time_ms", "device": "mobile"}
+  },
+  {
+    "id": "qoe_explicit_time",
+    "query": "查询华南 2026-09-01 11:00 到 2026-09-01 12:00 的 QoE。",
+    "expected_route": "tool",
+    "expected_tool": "query_qoe_metrics",
+    "expected_arguments": {"start_time": "2026-09-01 11:00:00", "end_time": "2026-09-01 12:00:00", "region": "华南"}
+  },
+  {
+    "id": "qoe_failed_by_region",
+    "query": "当前窗口按区域统计 failed session count。",
+    "expected_route": "tool",
+    "expected_tool": "query_qoe_metrics",
+    "expected_arguments": {"windows": ["current_window"], "primary_metric": "failed_sessions", "group_by": ["region"]}
+  },
+  {
+    "id": "alarm_high_e302",
+    "query": "华南 CDN-B 当前有哪些 E302 高等级告警？",
+    "expected_route": "tool",
+    "expected_tool": "get_alarm_events",
+    "expected_arguments": {"windows": ["current_window"], "region": "华南", "cdn": "CDN-B", "error_code": "E302", "severity": "high"}
+  },
+  {
+    "id": "alarm_open",
+    "query": "查询当前窗口仍 open 的告警。",
+    "expected_route": "tool",
+    "expected_tool": "get_alarm_events",
+    "expected_arguments": {"windows": ["current_window"], "status": "open"}
+  },
+  {
+    "id": "alarm_mixed_status",
+    "query": "查询华南 CDN-B 当前 E302 告警及状态分布。",
+    "expected_route": "tool",
+    "expected_tool": "get_alarm_events",
+    "expected_arguments": {"windows": ["current_window"], "region": "华南", "cdn": "CDN-B", "error_code": "E302"}
+  },
+  {
+    "id": "alarm_previous_window",
+    "query": "查询 CDN-B 上一窗口的告警事件。",
+    "expected_route": "tool",
+    "expected_tool": "get_alarm_events",
+    "expected_arguments": {"windows": ["previous_window"], "cdn": "CDN-B"}
+  },
+  {
+    "id": "logs_upstream_timeout",
+    "query": "检查 CDN-B 同期是否存在 upstream timeout 相关日志。",
+    "expected_route": "tool",
+    "expected_tool": "query_logs",
+    "expected_arguments": {"windows": ["current_window"], "cdn": "CDN-B", "message_contains": "upstream timeout"}
+  },
+  {
+    "id": "logs_structured_filters",
+    "query": "查询华南 CDN-B 当前 origin-proxy 的 ERROR E302 日志。",
+    "expected_route": "tool",
+    "expected_tool": "query_logs",
+    "expected_arguments": {"windows": ["current_window"], "region": "华南", "cdn": "CDN-B", "service": "origin-proxy", "level": "ERROR", "error_code": "E302"}
+  },
+  {
+    "id": "logs_trace",
+    "query": "查询 trace-e302-001 的日志。",
+    "expected_route": "tool",
+    "expected_tool": "query_logs",
+    "expected_arguments": {"trace_id": "trace-e302-001"}
+  },
+  {
+    "id": "transcode_failed_h265",
+    "query": "最近是否存在失败的 H.265 转码任务？",
+    "expected_route": "tool",
+    "expected_tool": "get_transcode_status",
+    "expected_arguments": {"windows": ["current_window"], "codec": "H.265", "status": "failed"}
+  },
+  {
+    "id": "transcode_running_av1",
+    "query": "查询当前 gpu-c 运行中的 AV1 转码任务。",
+    "expected_route": "tool",
+    "expected_tool": "get_transcode_status",
+    "expected_arguments": {"windows": ["current_window"], "codec": "AV1", "status": "running", "gpu_pool": "gpu-c"}
+  },
+  {
+    "id": "transcode_previous_success",
+    "query": "查询上一窗口成功的 H265 转码任务。",
+    "expected_route": "tool",
+    "expected_tool": "get_transcode_status",
+    "expected_arguments": {"windows": ["previous_window"], "codec": "H.265", "status": "succeeded"}
+  },
+  {
+    "id": "sql_custom_business_metric",
+    "query": "按自定义业务标签汇总收入。",
+    "expected_route": "sql",
+    "expected_tool": null,
+    "expected_arguments": {}
+  },
+  {
+    "id": "sql_ambiguous_compound_task",
+    "query": "在一个查询里同时返回播放成功率、告警和日志明细。",
+    "expected_route": "sql",
+    "expected_tool": null,
+    "expected_arguments": {}
+  },
+  {
+    "id": "sql_mutation_intent",
+    "query": "删除当前窗口的 E302 日志。",
+    "expected_route": "sql",
+    "expected_tool": null,
+    "expected_arguments": {}
+  }
+]

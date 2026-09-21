@@ -254,10 +254,36 @@ def _resolution_payload() -> str:
 
 
 def _answer(text: str = "A 类下降最大。", source: str = "compare") -> str:
+    evidence_ids = (
+        ["data:result:1"]
+        if source in {"query", "customers"}
+        else [
+            "data:analysis-comparison:1:group:1",
+            "data:analysis-comparison:1:group:2",
+        ]
+    )
+    limitation_ids = ["limitation:bounded_evidence"]
+    if source not in {"query", "customers"}:
+        limitation_ids.append("limitation:limited_time_windows")
     return json.dumps(
         {
-            "answer": text,
-            "key_findings": ["A declined"],
+            "data_evidence_ids": evidence_ids,
+            "knowledge_evidence_ids": [],
+            "inferences": [
+                {
+                    "bundle_id": (
+                        "bundle:scope:1"
+                        if source in {"query", "customers"}
+                        else "bundle:multi_group:ALL:category"
+                    ),
+                    "claim_type": "observation",
+                    "predicate": "general",
+                    "polarity": "neutral",
+                    "subject_evidence_ids": [],
+                    "supporting_evidence_ids": evidence_ids,
+                }
+            ],
+            "limitation_ids": limitation_ids,
             "source_task_ids": [source],
         },
         ensure_ascii=False,

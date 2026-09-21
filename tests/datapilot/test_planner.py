@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from datapilot.agent.planner import (
+    PLANNER_RESPONSE_SCHEMA,
     SYSTEM_PROMPT,
     Planner,
     PlannerError,
@@ -102,11 +103,16 @@ def _run_plan(
     *,
     query: str = "Show July sales",
     max_retries: int = 1,
+    planning_context: Mapping[str, Any] | None = None,
 ) -> tuple[Any, TraceCollector, FakePlannerModel, Any]:
     state = create_initial_state(query)
     trace = TraceCollector(trace_id=state["trace_id"])
     model = FakePlannerModel(payloads)
-    result = Planner(model, max_retries=max_retries).plan(state, trace=trace)
+    result = Planner(model, max_retries=max_retries).plan(
+        state,
+        trace=trace,
+        planning_context=planning_context,
+    )
     return result, trace, model, state
 
 
@@ -274,6 +280,181 @@ def test_planner_does_not_generate_sql() -> None:
     assert all("sql" not in asdict(task) for task in result.tasks)
     assert "Do not generate SQL" in SYSTEM_PROMPT
     assert "Do not generate SQL" in model.calls[0]["system_prompt"]
+
+
+def test_planner_receives_evidence_preserving_alarm_contract() -> None:
+    payload = _payload(
+        intent="single_query",
+        tasks=[
+            _task(
+                "alarms",
+                "Retrieve E302 counts, categorical distributions, and bounded "
+                "raw message samples.",
+            ),
+            _task(
+                "answer",
+                "Report the reviewed alarm evidence.",
+                task_type="response",
+                depends_on=["alarms"],
+            ),
+        ],
+        requires_database=True,
+    )
+
+    _, _, model, _ = _run_plan(
+        [json.dumps(payload)],
+        query="Summarize current E302 alarms.",
+    )
+
+    prompt = model.calls[0]["system_prompt"]
+    assert "bounded raw message samples" in prompt
+    assert "representative_message" in prompt
+    assert "MIN/MAX" in prompt
+
+
+def test_planner_receives_media_context_without_changing_output_contract() -> None:
+    media_context = {
+        "version": 1,
+        "entities": [
+            {
+                "name": "stream_sessions",
+                "important_fields": [
+                    {"name": name}
+                    for name in (
+                        "timestamp",
+                        "window_name",
+                        "region",
+                        "cdn",
+                        "device",
+                        "startup_time",
+                        "buffer_duration",
+                        "play_success",
+                    )
+                ],
+            },
+            {
+                "name": "alarm_events",
+                "important_fields": [
+                    {"name": name}
+                    for name in (
+                        "timestamp",
+                        "window_name",
+                        "region",
+                        "cdn",
+                        "error_code",
+                        "severity",
+                        "status",
+                    )
+                ],
+            },
+        ],
+        "dimensions": [
+            {
+                "name": "region",
+                "semantic_object": "stream_quality_metrics",
+                "source_entity": "stream_sessions",
+            },
+            {
+                "name": "cdn",
+                "semantic_object": "stream_quality_metrics",
+                "source_entity": "stream_sessions",
+            },
+        ],
+        "metrics": [
+            {
+                "name": "playback_success_rate",
+                "semantic_object": "stream_quality_metrics",
+                "source_entity": "stream_sessions",
+            }
+        ],
+        "semantic_objects": [
+            {
+                "name": "stream_quality_metrics",
+                "queryable_with_sql": False,
+                "base_entity": "stream_sessions",
+            }
+        ],
+        "views": [
+            {
+                "name": "hourly_alarm_correlation",
+                "available_fields": [
+                    "window_name",
+                    "region",
+                    "cdn",
+                    "playback_success_rate",
+                    "representative_high_error_code",
+                ],
+            }
+        ],
+        "relationships": [],
+        "truncated": False,
+    }
+    payload = _payload(
+        intent="multi_step_analysis",
+        tasks=[
+            _task(
+                "current_qoe",
+                "Retrieve current_window playback_success_rate by cdn for 华南.",
+            ),
+            _task(
+                "baseline_qoe",
+                "Retrieve previous_window playback_success_rate by cdn for 华南.",
+            ),
+            _task(
+                "alarms",
+                "Retrieve alarm_events by cdn, error_code, severity, and status.",
+            ),
+            _task(
+                "correlate",
+                "Correlate QoE changes with concurrent alarms without claiming causality.",
+                task_type="analysis",
+                depends_on=["current_qoe", "baseline_qoe", "alarms"],
+            ),
+            _task(
+                "answer",
+                "Report grounded facts and label temporal correlation as inference.",
+                task_type="response",
+                depends_on=["correlate"],
+            ),
+        ],
+        requires_database=True,
+    )
+
+    result, _, model, _ = _run_plan(
+        [json.dumps(payload, ensure_ascii=False)],
+        query="分析华南地区播放成功率下降的原因。",
+        planning_context=media_context,
+    )
+
+    prompt = model.calls[0]["user_prompt"]
+    descriptions = " ".join(task.description for task in result.tasks).lower()
+    assert "Current domain planning context" in prompt
+    assert "stream_sessions" in prompt
+    assert "alarm_events" in prompt
+    assert "error_code" in prompt
+    assert model.calls[0]["response_schema"] == PLANNER_RESPONSE_SCHEMA
+    assert set(asdict(result).keys()) == {
+        "intent",
+        "reason_summary",
+        "tasks",
+        "requires_database",
+        "requires_context",
+        "is_follow_up",
+    }
+    assert not any(
+        unavailable in descriptions
+        for unavailable in (
+            "province",
+            "isp",
+            "operating system",
+            "app version",
+            "content type",
+            "session error code",
+        )
+    )
+    assert "stream_quality_metrics" not in descriptions
+    query_tasks = [task for task in result.tasks if task.task_type == "query"]
+    assert len(query_tasks) == 3
 
 
 @pytest.mark.parametrize(

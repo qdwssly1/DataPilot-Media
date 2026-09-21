@@ -1,0 +1,6 @@
+schema_version: 5
+name: datapilot_media
+catalog: wren
+schema: public
+data_source: duckdb
+profile: datapilot_media_duckdb

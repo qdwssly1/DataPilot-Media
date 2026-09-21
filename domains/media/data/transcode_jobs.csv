@@ -1,0 +1,11 @@
+job_id,timestamp,window_name,region,codec,status,error_code,duration,gpu_pool
+job-py-001,2025-09-01 11:10:00,prior_year,华东,H.264,succeeded,NONE,82.4,gpu-a
+job-pd-001,2026-08-31 11:15:00,previous_day,华南,H.265,succeeded,NONE,95.1,gpu-b
+job-prev-001,2026-09-01 10:08:00,previous_window,华南,H.265,succeeded,NONE,91.3,gpu-b
+job-prev-002,2026-09-01 10:26:00,previous_window,华北,AV1,succeeded,NONE,140.8,gpu-c
+job-cur-001,2026-09-01 11:04:00,current_window,华南,H.265,failed,T501,34.7,gpu-b
+job-cur-002,2026-09-01 11:14:00,current_window,华南,H.265,failed,T501,37.2,gpu-b
+job-cur-003,2026-09-01 11:21:00,current_window,华东,H.264,succeeded,NONE,78.5,gpu-a
+job-cur-004,2026-09-01 11:29:00,current_window,华北,AV1,running,NONE,42.0,gpu-c
+job-cur-005,2026-09-01 11:37:00,current_window,华南,H.264,queued,NONE,0.0,gpu-a
+job-cur-006,2026-09-01 11:43:00,current_window,华北,H.265,succeeded,NONE,93.6,gpu-b

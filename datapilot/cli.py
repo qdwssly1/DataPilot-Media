@@ -34,7 +34,19 @@ from datapilot.agent.state import (
 )
 from datapilot.llm.openai_compatible import OpenAICompatiblePlannerModel
 from datapilot.memory.session_memory import SessionMemoryStore
-from datapilot.tools.wren_tools import WrenConfigurationError, WrenToolAdapter
+from datapilot.retrieval.integration import (
+    KnowledgeRetrieverProtocol,
+    build_domain_retriever,
+    retrieve_into_state,
+)
+from datapilot.tools.contracts import ToolRegistry
+from datapilot.tools.discovery import build_domain_tool_registry
+from datapilot.tools.router import ToolRouter
+from datapilot.tools.wren_tools import (
+    WrenConfigurationError,
+    WrenToolAdapter,
+    try_fetch_planning_context,
+)
 from datapilot.tracing.summary import format_trace_summary, summarize_trace
 from datapilot.tracing.trace import EventType, TraceCollector
 
@@ -119,11 +131,17 @@ def process_input(
 def process_planner_input(
     user_query: str,
     planner: Planner,
+    *,
+    planning_context: Mapping[str, Any] | None = None,
 ) -> PlannerExecutionResult:
     """Initialize one request and run only the Planner component."""
 
     initialized = process_input(user_query)
-    planner_result = planner.plan(initialized.state, trace=initialized.trace)
+    planner_result = planner.plan(
+        initialized.state,
+        trace=initialized.trace,
+        planning_context=planning_context,
+    )
     return PlannerExecutionResult(
         state=initialized.state,
         trace=initialized.trace,
@@ -178,8 +196,12 @@ def format_sql_result(
 ) -> str:
     """Render observable SQL Agent stages without generating an answer."""
 
+    if result.execution_source == "tool":
+        source_label = f"[Media Tool: {result.tool_name}]"
+    else:
+        source_label = "[SQL Agent Retry]" if is_semantic_retry else "[SQL Agent]"
     lines = [
-        "[SQL Agent Retry]" if is_semantic_retry else "[SQL Agent]",
+        source_label,
         f"Task: {task.task_id} - {task.description}",
         "",
         "[Context]",
@@ -282,6 +304,9 @@ def run_cli(
     session_store: SessionMemoryStore | None = None,
     session_id: str | None = None,
     wren_tools: WrenTools | None = None,
+    knowledge_retriever: KnowledgeRetrieverProtocol | None = None,
+    tool_registry: ToolRegistry | None = None,
+    tool_router: ToolRouter | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> int:
     """Run a reusable in-memory session until user exit."""
@@ -293,6 +318,13 @@ def run_cli(
     active_resolver = follow_up_resolver
     active_extractor = context_extractor
     active_wren_tools = wren_tools
+    active_knowledge_retriever = knowledge_retriever
+    active_tool_registry = tool_registry
+    active_tool_router = tool_router
+    if active_tool_router is None and active_tool_registry is not None:
+        active_tool_router = ToolRouter(active_tool_registry)
+    knowledge_discovery_attempted = knowledge_retriever is not None
+    tool_discovery_attempted = active_tool_router is not None
     active_store = (
         session_store if session_store is not None else SessionMemoryStore()
     )
@@ -349,6 +381,37 @@ def run_cli(
             session_id=active_session_id,
             previous_session=previous_session,
         )
+        if not knowledge_discovery_attempted:
+            knowledge_discovery_attempted = True
+            try:
+                active_knowledge_retriever = build_domain_retriever(environ)
+            except Exception:
+                active_knowledge_retriever = None
+        retrieve_into_state(
+            initialized.state,
+            active_knowledge_retriever,
+        )
+        planning_tools: Any = active_wren_tools
+        if planning_tools is None and active_sql_agent is not None:
+            planning_tools = active_sql_agent.wren_tools
+        if planning_tools is None:
+            try:
+                active_wren_tools = WrenToolAdapter.from_env(environ)
+            except WrenConfigurationError:
+                active_wren_tools = None
+            planning_tools = active_wren_tools
+        planning_context = try_fetch_planning_context(planning_tools)
+        if not tool_discovery_attempted:
+            tool_discovery_attempted = True
+            active_tool_registry = build_domain_tool_registry(
+                planning_tools,
+                planning_context,
+            )
+            if active_tool_registry is not None:
+                active_tool_router = ToolRouter(
+                    active_tool_registry,
+                    capability_context=planning_context,
+                )
         try:
             planning = prepare_session_turn(
                 initialized.state,
@@ -356,6 +419,7 @@ def run_cli(
                 active_resolver,
                 active_store,
                 trace=initialized.trace,
+                planning_context=planning_context,
             )
         except (PlannerError, FollowUpResolutionError) as exc:
             output_fn(f"Planner failed: {exc}")
@@ -375,11 +439,8 @@ def run_cli(
 
         if active_sql_agent is None:
             if active_wren_tools is None:
-                try:
-                    active_wren_tools = WrenToolAdapter.from_env(environ)
-                except WrenConfigurationError:
-                    output_fn(WREN_RUNTIME_NOT_CONFIGURED)
-                    continue
+                output_fn(WREN_RUNTIME_NOT_CONFIGURED)
+                continue
             active_sql_agent = SQLAgent(
                 model_client=active_planner.model_client,
                 wren_tools=active_wren_tools,
@@ -403,6 +464,7 @@ def run_cli(
                 active_reviewer,
                 active_analyst,
                 trace=initialized.trace,
+                tool_router=active_tool_router,
             )
         except (SQLAgentError, ReviewerError, AnalystError) as exc:
             output_fn(f"DataPilot workflow failed: {exc}")

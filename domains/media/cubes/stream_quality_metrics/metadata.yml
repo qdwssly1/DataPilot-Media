@@ -1,0 +1,50 @@
+name: stream_quality_metrics
+base_object: stream_sessions
+measures:
+  - name: session_count
+    expression: COUNT(*)
+    type: BIGINT
+  - name: successful_sessions
+    expression: SUM(CASE WHEN play_success THEN 1 ELSE 0 END)
+    type: BIGINT
+  - name: failed_sessions
+    expression: SUM(CASE WHEN play_success THEN 0 ELSE 1 END)
+    type: BIGINT
+  - name: playback_success_rate
+    expression: AVG(CASE WHEN play_success THEN 1.0 ELSE 0.0 END)
+    type: DOUBLE
+  - name: average_startup_time
+    expression: AVG(startup_time)
+    type: DOUBLE
+  - name: total_buffer_duration
+    expression: SUM(buffer_duration)
+    type: DOUBLE
+  - name: total_playback_duration
+    expression: SUM(playback_duration)
+    type: DOUBLE
+  - name: rebuffer_ratio
+    expression: SUM(buffer_duration) / NULLIF(SUM(playback_duration), 0)
+    type: DOUBLE
+dimensions:
+  - name: window_name
+    expression: window_name
+    type: VARCHAR
+  - name: region
+    expression: region
+    type: VARCHAR
+  - name: cdn
+    expression: cdn
+    type: VARCHAR
+  - name: device
+    expression: device
+    type: VARCHAR
+time_dimensions:
+  - name: timestamp
+    expression: timestamp
+    type: TIMESTAMP
+hierarchies:
+  playback_scope: [region, cdn, device]
+properties:
+  description: >-
+    Session-grain QoE measures for window, region, CDN, and device analysis.
+    Playback success rate is an average of the session-level boolean indicator.

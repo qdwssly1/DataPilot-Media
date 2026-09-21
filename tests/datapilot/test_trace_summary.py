@@ -127,3 +127,29 @@ def test_trace_summary_follow_up_run() -> None:
     assert summary.task_count == 2
     assert summary.completed_task_count == 2
     assert summary.success is True
+
+
+def test_trace_summary_reports_tool_routing_execution_and_fallback() -> None:
+    events = [
+        _event(
+            EventType.TOOL_ROUTING_COMPLETED,
+            0,
+            task_id="q1",
+            duration=0.001,
+        ),
+        _event(EventType.TOOL_EXECUTION_STARTED, 1, task_id="q1"),
+        _event(
+            EventType.TOOL_EXECUTION_FAILED,
+            3,
+            task_id="q1",
+            duration=0.002,
+        ),
+        _event(EventType.TOOL_FALLBACK, 4, task_id="q1"),
+    ]
+
+    summary = summarize_trace(events)
+
+    assert summary.tool_router_duration_ms == 1
+    assert summary.tool_execution_duration_ms == 2
+    assert summary.tool_call_count == 1
+    assert summary.tool_fallback_count == 1
