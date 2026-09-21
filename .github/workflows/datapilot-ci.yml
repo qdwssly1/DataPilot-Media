@@ -36,6 +36,12 @@ jobs:
   test:
     name: Python 3.13 tests
     runs-on: ubuntu-latest
+    env:
+      MEDIA_DUCKDB_DIR: ${{ github.workspace }}/domains/media/data
+      WREN_HOME: ${{ github.workspace }}/domains/media/.wren
+      WREN_PROJECT_PATH: ${{ github.workspace }}/domains/media
+      WREN_PROFILE: datapilot_media_duckdb
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -55,6 +61,19 @@ jobs:
           "import anyio, duckdb, dotenv, httpx, mcp, pydantic, pytest,
           sqlglot, wren, wren_core, wren_langchain;
           print('offline test dependencies OK')"
+      - name: Generate synthetic Media data
+        run: >-
+          uv run --project core/wren --no-sync python
+          domains/media/data/generate_data.py
+      - name: Configure Media DuckDB profile
+        run: >-
+          uv run --project core/wren --no-sync wren profile add
+          datapilot_media_duckdb --from-file domains/media/profile.yml
+      - name: Build and validate Media Wren context
+        run: |
+          uv run --project core/wren --no-sync wren context build --path domains/media
+          uv run --project core/wren --no-sync wren context validate --path domains/media
+          test -f domains/media/target/mdl.json
       - name: Run DataPilot tests
         run: uv run --project core/wren --no-sync python -m pytest tests/datapilot -v
       - name: Run Media tests
