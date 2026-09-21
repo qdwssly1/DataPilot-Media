@@ -20,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout WrenAI
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout doc website
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ vars.DOCS_REPO }}
           token: ${{ secrets.CROSS_REPO_TOKEN }}

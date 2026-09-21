@@ -28,7 +28,7 @@ jobs:
       # Needed for the OIDC token exchange with crates.io (Trusted Publishing).
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag_name }}
 

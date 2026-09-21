@@ -35,7 +35,7 @@ jobs:
       tag_name: ${{ steps.rc.outputs.tag_name }}
       pypi_version: ${{ steps.rc.outputs.pypi_version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
