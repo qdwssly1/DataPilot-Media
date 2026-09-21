@@ -190,7 +190,7 @@ jobs:
       contents: write
     steps:
       - name: Create GitHub pre-release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.create-rc.outputs.tag_name }}
           name: "${{ inputs.component }} ${{ needs.create-rc.outputs.version }}"
