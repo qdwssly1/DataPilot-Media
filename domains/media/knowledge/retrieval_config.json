@@ -14,16 +14,29 @@
     "rebuffer_ratio": ["rebuffer ratio", "buffering ratio", "卡顿率", "缓冲占比", "卡顿"],
     "startup_time": ["startup time", "time to first frame", "ttff", "首帧耗时", "起播耗时", "启动延迟"],
     "failed_session_count": ["failed session count", "play failures", "失败会话数", "播放失败数"],
-    "upstream_timeout": ["upstream timeout", "origin timeout", "上游超时", "源站超时", "回源超时"],
+    "playback_failure": ["playback failure", "startup failure", "播放失败", "启动失败", "黑屏", "加载失败", "进不去"],
+    "buffering": ["buffering", "rebuffering", "stall", "转圈", "播放卡住", "播放一会就停", "断断续续"],
+    "upstream_timeout": ["upstream timeout", "origin timeout", "上游超时", "源站超时", "回源超时", "回源连接超时"],
+    "cache_origin_flow": ["cache hit ratio", "cache miss", "origin fetch", "缓存命中率", "缓存未命中", "回源请求", "回源量", "源站拿内容"],
+    "dns_routing_failover": ["dns routing", "origin failover", "regional degradation", "dns解析", "域名解析", "区域退化", "路由切换", "故障转移"],
     "cdn_degradation": ["cdn degradation", "playback success degradation", "cdn incident", "cdn质量下降", "cdn故障", "播放质量下降", "播放成功率下降"],
     "alarm_correlation": ["alarm correlation", "correlate alarms", "告警关联", "同期告警"],
+    "live_streaming": ["live streaming", "live pipeline", "ingest", "push stream", "直播链路", "推流", "直播清单", "分片发布"],
+    "observability_correlation": ["metric alarm log correlation", "multi-source evidence", "指标告警日志", "指标、告警和日志", "作用域对齐", "多源证据"],
     "transcoding": ["transcoding", "transcode", "转码", "编码转换"],
+    "transcode_failure": ["transcode failure", "encoding failure", "转码失败", "编码失败", "任务失败"],
     "codec": ["codec", "h.264", "h.265", "av1", "编码器", "编解码"]
   },
   "category_hints": {
     "qoe_metric": ["metric", "formula", "指标", "定义", "口径", "怎么计算"],
-    "error_code": ["error code", "错误码", "告警码", "e302", "e401", "e503"],
+    "error_code": ["error code", "错误码", "告警码", "输入无法读取", "输入不可读", "e302", "e401", "e503"],
     "troubleshooting_sop": ["sop", "troubleshoot", "排查", "检查什么", "怎么办", "建议"],
+    "playback_troubleshooting": ["playback failure", "播放失败", "黑屏", "加载失败", "清单", "媒体分片", "鉴权"],
+    "qoe_diagnostics": ["qoe", "首帧", "启动延迟", "卡顿", "重缓冲", "转圈", "播放中断"],
+    "cdn_architecture": ["cdn cache", "origin fetch", "缓存", "命中率", "边缘节点", "回源链路", "回源请求"],
+    "cdn_troubleshooting": ["origin timeout", "upstream timeout", "回源", "源站超时", "dns", "域名解析", "路由切换", "故障转移"],
+    "streaming_architecture": ["live streaming", "live pipeline", "直播链路", "推流", "接入", "打包", "直播清单", "分片发布"],
+    "observability": ["observability", "correlation", "指标", "告警", "日志", "作用域", "多源证据"],
     "codec_transcoding": ["codec", "transcode", "编码", "转码", "h.264", "h.265", "av1"]
   }
 }

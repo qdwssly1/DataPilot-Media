@@ -9,6 +9,10 @@ tags: [qoe, metric, playback, aggregation]
 
 ## Playback Success Rate / 播放成功率
 
+播放成功率表示有效播放尝试中成功起播的会话占比。在 DataPilot-Media 合成模型中，`play_success = true` 表示成功会话；指标口径应同时说明分子、分母、单位和排除规则。
+
+跨区域、CDN、设备或时间窗口聚合时，必须先汇总成功会话数与总尝试数，再重新计算比率；不能直接平均分母不同的预聚合播放成功率。
+
 ### Definition
 
 The share of attempted playback sessions that start successfully. In the Media synthetic model, a successful session has `play_success = true`.

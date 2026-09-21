@@ -15,6 +15,8 @@ A codec name alone does not explain QoE degradation. Validate device compatibili
 
 ## Transcoding Pipeline Stages
 
+转码管线通常包含输入读取、解封装、解码、滤镜/缩放、编码、封装、分片、清单生成和输出校验。输入无法读取时，应先核对对象存在性、访问权限、完整性与容器探测结果，再判断是否适合重试。
+
 A minimal on-demand pipeline reads and demuxes the input, decodes it, filters or scales frames, encodes renditions, packages segments and manifests, validates outputs, and publishes artifacts. A live pipeline performs similar stages under tighter latency and backpressure constraints.
 
 Failures should be localized to a stage using job status, error code, worker logs, input metadata, and output validation. Retry is appropriate only after classifying whether the failure is transient or deterministic.

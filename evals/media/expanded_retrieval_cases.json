@@ -1,0 +1,178 @@
+[
+  {
+    "id": "playback-black-screen-triage",
+    "query": "点了播放一直黑屏，应该从哪里查？",
+    "expected_document": "media-playback-failure",
+    "topic": "playback_failure",
+    "expected_section": "建议排查步骤",
+    "relevant_set": ["media-playback-failure::04-4-troubleshooting-steps"]
+  },
+  {
+    "id": "playback-manifest-auth-segment",
+    "query": "用户能打开页面但视频加载失败，清单鉴权和媒体分片该怎么定位？",
+    "expected_document": "media-playback-failure",
+    "topic": "playback_failure",
+    "expected_section": "常见候选原因",
+    "relevant_set": ["media-playback-failure::03-3-common-candidates"]
+  },
+  {
+    "id": "startup-slow-user-paraphrase",
+    "query": "为什么视频打开后很久才出画面？",
+    "expected_document": "media-startup-latency-diagnostics",
+    "topic": "startup_latency",
+    "expected_section": "常见指标与现象",
+    "relevant_set": ["media-startup-latency-diagnostics::02-2-metrics-and-symptoms"]
+  },
+  {
+    "id": "startup-phase-decomposition",
+    "query": "首帧耗时突然升高，怎样区分 DNS、TCP、TLS 和首个媒体字节？",
+    "expected_document": "media-startup-latency-diagnostics",
+    "topic": "startup_latency",
+    "expected_section": "建议排查步骤",
+    "relevant_set": ["media-startup-latency-diagnostics::04-4-troubleshooting-steps"]
+  },
+  {
+    "id": "buffering-spinner-paraphrase",
+    "query": "画面一直转圈，播放一会就停一下。",
+    "expected_document": "media-buffering-rebuffering",
+    "topic": "buffering_rebuffering",
+    "expected_section": "定义与范围",
+    "relevant_set": ["media-buffering-rebuffering::01-1-definition-and-scope"]
+  },
+  {
+    "id": "buffering-cause-isolation",
+    "query": "卡顿率上升时如何区分带宽不足、分片下载慢和解码问题？",
+    "expected_document": "media-buffering-rebuffering",
+    "topic": "buffering_rebuffering",
+    "expected_section": "建议排查步骤",
+    "relevant_set": ["media-buffering-rebuffering::04-4-troubleshooting-steps"]
+  },
+  {
+    "id": "cdn-cache-origin-request-path",
+    "query": "CDN 请求从边缘缓存到回源的处理链路是什么？",
+    "expected_document": "media-cdn-cache-origin-flow",
+    "topic": "cdn_cache_origin_flow",
+    "expected_section": "定义与请求路径",
+    "relevant_set": ["media-cdn-cache-origin-flow::01-1-definition-and-request-path"]
+  },
+  {
+    "id": "cdn-keeps-fetching-origin",
+    "query": "CDN 为什么一直去源站拿内容，缓存命中率该怎么看？",
+    "expected_document": "media-cdn-cache-origin-flow",
+    "topic": "cdn_cache_origin_flow",
+    "expected_section": "常见指标与现象",
+    "relevant_set": ["media-cdn-cache-origin-flow::02-2-metrics-and-symptoms"]
+  },
+  {
+    "id": "origin-connection-timeout-triage",
+    "query": "回源连接超时应该怎么排查？",
+    "expected_document": "media-origin-timeout",
+    "topic": "origin_timeout",
+    "expected_section": "建议排查步骤",
+    "relevant_set": ["media-origin-timeout::04-4-troubleshooting-steps"]
+  },
+  {
+    "id": "e302-domain-boundary",
+    "query": "E302 是 CDN 行业统一错误码吗，它在 DataPilot-Media 里表示什么？",
+    "expected_document": "media-error-codes",
+    "topic": "origin_timeout",
+    "expected_section": "E302 与 CDN Upstream Timeout",
+    "relevant_set": ["media-error-codes::01-e302-cdn-upstream-timeout"]
+  },
+  {
+    "id": "regional-dns-routing-degradation",
+    "query": "华南某 CDN 区域退化和路由切换应该怎么查？",
+    "expected_document": "media-dns-routing-failover",
+    "topic": "dns_routing_failover",
+    "expected_section": "建议排查步骤",
+    "relevant_set": ["media-dns-routing-failover::04-4-troubleshooting-steps"]
+  },
+  {
+    "id": "origin-failover-not-effective",
+    "query": "主源站超时后切到备源仍失败，常见原因有哪些？",
+    "expected_document": "media-dns-routing-failover",
+    "topic": "dns_routing_failover",
+    "expected_section": "常见候选原因",
+    "relevant_set": ["media-dns-routing-failover::03-3-common-candidates"]
+  },
+  {
+    "id": "live-stream-end-to-end-pipeline",
+    "query": "直播从推流、转码、打包到观众播放经过哪些环节？",
+    "expected_document": "media-live-streaming-pipeline",
+    "topic": "live_streaming_pipeline",
+    "expected_section": "定义与通用链路",
+    "relevant_set": ["media-live-streaming-pipeline::01-1-definition-and-pipeline"]
+  },
+  {
+    "id": "live-manifest-segment-publication",
+    "query": "直播清单不更新、最新分片发布晚可能是哪一段出问题？",
+    "expected_document": "media-live-streaming-pipeline",
+    "topic": "live_streaming_pipeline",
+    "expected_section": "常见候选原因",
+    "relevant_set": ["media-live-streaming-pipeline::03-3-common-candidates"]
+  },
+  {
+    "id": "live-ingest-healthy-viewer-fails",
+    "query": "推流显示正常但观众播放失败，怎样逐段排查直播链路？",
+    "expected_document": "media-live-stream-failure-sop",
+    "topic": "live_stream_failure_sop",
+    "expected_section": "逐段验证链路",
+    "relevant_set": ["media-live-stream-failure-sop::03-3-validate-each-stage"]
+  },
+  {
+    "id": "transcode-source-playable-job-fails",
+    "query": "源文件能播放但转码任务失败，下一步应该检查什么？",
+    "expected_document": "media-transcode-failure",
+    "topic": "transcode_failure",
+    "expected_section": "建议排查步骤",
+    "relevant_set": ["media-transcode-failure::04-4-troubleshooting-steps"]
+  },
+  {
+    "id": "transcode-codec-container-profile",
+    "query": "转码报编码或容器不支持，还要核对 Profile、Level 和像素格式吗？",
+    "expected_document": "media-transcode-failure",
+    "topic": "transcode_failure",
+    "expected_section": "常见候选原因",
+    "relevant_set": ["media-transcode-failure::03-3-common-candidates"]
+  },
+  {
+    "id": "metric-alarm-log-correlation",
+    "query": "播放指标、告警和日志同时异常，怎样对齐作用域并分析？",
+    "expected_document": "media-metric-alarm-log-correlation",
+    "topic": "metric_alarm_log_correlation",
+    "expected_section": "建议排查步骤",
+    "relevant_set": ["media-metric-alarm-log-correlation::04-4-troubleshooting-steps"]
+  },
+  {
+    "id": "mixed-alarm-status-aggregation",
+    "query": "告警同时有 open、investigating、resolved，能用 MAX(status) 代表全部吗？",
+    "expected_document": "media-metric-alarm-log-correlation",
+    "topic": "metric_alarm_log_correlation",
+    "expected_section": "常见分析错误",
+    "relevant_set": ["media-metric-alarm-log-correlation::03-3-common-failure-modes"]
+  },
+  {
+    "id": "negative-python-containers",
+    "query": "Python 列表和元组有什么区别？",
+    "expected_document": null,
+    "topic": "out_of_domain",
+    "expected_section": null,
+    "relevant_set": []
+  },
+  {
+    "id": "negative-git-commit",
+    "query": "如何撤销 Git 最近一次提交？",
+    "expected_document": null,
+    "topic": "out_of_domain",
+    "expected_section": null,
+    "relevant_set": []
+  },
+  {
+    "id": "negative-annual-leave",
+    "query": "公司年假可以结转吗？",
+    "expected_document": null,
+    "topic": "out_of_domain",
+    "expected_section": null,
+    "relevant_set": []
+  }
+]

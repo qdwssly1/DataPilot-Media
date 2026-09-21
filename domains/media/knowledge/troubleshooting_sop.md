@@ -9,6 +9,8 @@ tags: [sop, qoe, cdn, startup, rebuffer, alarm]
 
 ## CDN Playback Success Degradation SOP
 
+CDN 播放成功率下降时，应先用等长基线/当前窗口重算整体与区域、CDN 分组指标，再关联同作用域告警、日志、发布和流量切换；降幅较小的 CDN 不能自动称为健康对照组。
+
 1. Define equal baseline and current windows and recompute playback success rate from successful and total sessions; do not average ratios.
 2. Confirm the overall change and attempt volume, then break down only by available dimensions such as region, CDN, and device.
 3. Identify the region/CDN with the largest weighted contribution using failed-session or denominator-aware changes.
@@ -36,6 +38,8 @@ An aggregate `startup_time` increase locates a symptom. It cannot by itself dist
 Do not average pre-aggregated ratios. Do not claim a CDN or codec root cause without the corresponding telemetry or an intervention that changes the symptom.
 
 ## Alarm Correlation and Evidence Rules
+
+同期告警与 QoE 下降只能在时间、区域和 CDN 作用域一致时形成相关性证据。告警状态应保留真实分布，不能用单一聚合值代替全部事件，也不能把时间重合表述为已证明的因果关系。
 
 Match an alarm to a QoE window by overlapping time and the shared region/CDN scope. Include severity and status, and distinguish an active alarm from a historical or resolved alarm.
 

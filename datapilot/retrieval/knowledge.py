@@ -26,6 +26,10 @@ _TOKEN_RE = re.compile(
     r"[A-Za-z]\d{2,}|[A-Za-z]+(?:[_-][A-Za-z0-9]+)*|\d+(?:\.\d+)?|[\u4e00-\u9fff]+"
 )
 _DEFAULT_ERROR_CODE_RE = re.compile(r"\b[A-Z]\d{3}\b", re.IGNORECASE)
+_REFERENCE_HEADING_RE = re.compile(
+    r"^(?:\d+(?:\.\d+)*[.)]?\s*)?(?:references?|参考资料|参考来源|资料来源)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +158,28 @@ def _slug(value: str) -> str:
     return f"section-{digest}"
 
 
+def _is_reference_heading(value: str) -> bool:
+    return _REFERENCE_HEADING_RE.fullmatch(value.strip()) is not None
+
+
+def _without_reference_subsections(lines: list[str]) -> list[str]:
+    """Keep source references in Markdown while excluding them from retrieval."""
+
+    output: list[str] = []
+    skipping = False
+    for line in lines:
+        match = _HEADING_RE.match(line)
+        if match and len(match.group(1)) >= 3:
+            if _is_reference_heading(match.group(2)):
+                skipping = True
+                continue
+            if skipping:
+                skipping = False
+        if not skipping:
+            output.append(line)
+    return output
+
+
 def _split_paragraphs(text: str, *, max_chars: int) -> list[str]:
     paragraphs = [item.strip() for item in re.split(r"\n\s*\n", text) if item.strip()]
     groups: list[str] = []
@@ -193,7 +219,12 @@ def _document_sections(body: str, *, max_chars: int) -> list[tuple[str, str]]:
 
     output: list[tuple[str, str]] = []
     for section_title, section_lines in sections:
+        if _is_reference_heading(section_title):
+            continue
+        section_lines = _without_reference_subsections(section_lines)
         text = "\n".join(section_lines).strip()
+        if not text:
+            continue
         if len(text) <= max_chars:
             output.append((section_title, text))
             continue

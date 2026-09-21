@@ -9,7 +9,8 @@ reported separately and must not be interpreted as offline benchmark accuracy.
 | Evaluation | Runner or artifact | Scope |
 |---|---|---|
 | Tool Golden Set | `run_tool_eval.py` / `tool_cases.json` | 18 selection, argument, and execution cases |
-| Retrieval Eval | `run_retrieval_eval.py` / `retrieval_cases.json` | 15 synthetic knowledge queries |
+| Original Retrieval Eval | `run_retrieval_eval.py` / `retrieval_cases.json` | 15 synthetic knowledge queries retained as the original small set |
+| Expanded Retrieval Eval | `run_retrieval_eval.py --expanded` / `expanded_retrieval_cases.json` | 22 separately annotated knowledge-expansion queries |
 | Offline Agent Eval | `run_tool_offline_cases.py` | deterministic tools plus six Planner comparison shapes |
 | MCP smoke | `run_mcp_smoke.py` | real stdio client/server protocol and seven checks |
 | Real DeepSeek E2E | `phase3_real_e2e_result.json` | one authorized complete synthetic workflow |
@@ -23,6 +24,7 @@ Generate the fixture and prepare Wren first; see
 ```powershell
 .\.venv\Scripts\python.exe -m evals.media.run_tool_eval
 .\.venv\Scripts\python.exe -m evals.media.run_retrieval_eval
+.\.venv\Scripts\python.exe -m evals.media.run_retrieval_eval --expanded
 .\.venv\Scripts\python.exe -m evals.media.run_tool_offline_cases
 .\.venv\Scripts\python.exe -m evals.media.run_mcp_smoke
 ```
@@ -49,7 +51,10 @@ Latest verified result:
 
 ## Retrieval Eval
 
-The corpus is split by Markdown headings. Retrieval modes are:
+The 14-document corpus is split into 86 retrievable chunks by Markdown
+headings. Source `References` remain in each Markdown document for human
+traceability but are excluded from retrieval chunks, so citation lists do not
+compete with diagnostic content. Retrieval modes are:
 
 - `lexical`: BM25 with domain alias expansion;
 - `semantic`: local deterministic TF-IDF feature-hash vectors plus concept
@@ -62,18 +67,34 @@ average over annotated relevant chunks. MRR is calculated over the returned top
 three chunks. The unrelated query is excluded from recall/MRR and evaluated as
 no-result accuracy.
 
-Latest verified 15-case results:
+Latest verified original 15-case results on the expanded corpus:
 
 | Mode | Recall@1 | Recall@3 | MRR@3 | Unrelated no-result |
 |---|---:|---:|---:|---:|
-| Lexical / BM25 | 0.785714 | 1.000000 | 0.928571 | 1.000000 |
-| Semantic | 0.571429 | 0.928571 | 0.773810 | 1.000000 |
-| Hybrid RRF | 0.785714 | 1.000000 | 0.916667 | 1.000000 |
-| Hybrid + Rerank | 0.928571 | 1.000000 | 1.000000 | 1.000000 |
+| Lexical / BM25 | 0.571429 | 1.000000 | 0.785714 | 1.000000 |
+| Semantic | 0.428571 | 0.678571 | 0.607143 | 1.000000 |
+| Hybrid RRF | 0.500000 | 0.785714 | 0.666667 | 1.000000 |
+| Hybrid + Rerank | 0.642857 | 0.928571 | 0.821429 | 1.000000 |
 
-On this small synthetic development set, Hybrid + Rerank has the strongest
+The original annotations intentionally remain unchanged. The added corpus now
+contains relevant replacement chunks that this older ground truth does not
+label, so these values are a regression signal rather than a complete relevance
+judgment.
+
+Latest verified expanded 22-case results (19 positive and 3 out-of-domain):
+
+| Mode | Recall@1 | Recall@3 | MRR@3 | Unrelated no-result |
+|---|---:|---:|---:|---:|
+| Lexical / BM25 | 0.631579 | 0.842105 | 0.728070 | 0.333333 |
+| Semantic | 0.315789 | 0.631579 | 0.464912 | 0.333333 |
+| Hybrid RRF | 0.631579 | 0.894737 | 0.736842 | 0.333333 |
+| Hybrid + Rerank | 0.736842 | 0.947368 | 0.842105 | 0.333333 |
+
+On both small synthetic development sets, Hybrid + Rerank has the strongest
 metrics. Plain Hybrid does not uniformly outperform BM25, so the results must
-not be generalized beyond this set.
+not be generalized beyond these sets. The expanded failure analysis also shows
+that the current retriever has no calibrated relevance threshold: two of three
+new out-of-domain paraphrases return results because of generic token overlap.
 
 ## Offline Agent Eval
 
