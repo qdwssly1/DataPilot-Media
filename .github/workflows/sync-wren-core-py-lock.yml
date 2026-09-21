@@ -60,7 +60,7 @@ jobs:
           echo "Syncing core/wren to wren-core-py ${version}"
           echo "VERSION=${version}" >> "$GITHUB_ENV"
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
 
       - name: Bump floor and relock core/wren against published wren-core-py
         working-directory: core/wren
