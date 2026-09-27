@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from typing import Any
 
+import pytest
+
+from datapilot import cli
 from datapilot.agent.analyst import Analyst
 from datapilot.agent.planner import Planner
 from datapilot.agent.reviewer import Reviewer
 from datapilot.agent.sql_agent import SQLAgent
 from datapilot.cli import (
+    CLI_ANALYSIS_COMPLETE,
+    CLI_ANALYZING,
+    CLI_HEADER,
+    CLI_QUESTION_HINT,
+    CLI_VERBOSE_HINT,
+    HUMAN_CONFIGURATION_REQUIRED,
+    HUMAN_GOODBYE,
     PLANNER_CONFIGURATION_HELP,
     PLANNER_CONFIGURATION_REQUIRED,
     PROMPT,
@@ -17,6 +29,7 @@ from datapilot.cli import (
     run_cli,
     state_snapshot,
 )
+from datapilot.cli_renderer import HUMAN_ANSWER_UNAVAILABLE
 from datapilot.tools.wren_tools import WrenQueryResult
 from datapilot.tracing.trace import EventType
 
@@ -278,6 +291,7 @@ def test_cli_requires_llm_configuration_without_fake_success() -> None:
         input_fn=fake_input,
         output_fn=outputs.append,
         environ={},
+        verbose=True,
     )
 
     assert exit_code == 0
@@ -300,6 +314,7 @@ def test_cli_prints_real_planner_result_from_injected_model() -> None:
         output_fn=outputs.append,
         planner=planner,
         environ={},
+        verbose=True,
     )
 
     assert exit_code == 0
@@ -328,6 +343,7 @@ def test_cli_fetches_planning_context_before_planner() -> None:
         reviewer=Reviewer(model_client=StaticReviewerModel()),
         wren_tools=tools,
         environ={},
+        verbose=True,
     )
 
     assert exit_code == 0
@@ -353,6 +369,7 @@ def test_cli_planner_continues_when_planning_context_fetch_fails() -> None:
         reviewer=Reviewer(model_client=StaticReviewerModel()),
         wren_tools=tools,
         environ={},
+        verbose=True,
     )
 
     assert exit_code == 0
@@ -378,6 +395,7 @@ def test_cli_runs_sql_agent_without_fake_final_answer() -> None:
         sql_agent=sql_agent,
         reviewer=reviewer,
         environ={},
+        verbose=True,
     )
 
     assert exit_code == 0
@@ -442,6 +460,7 @@ def test_cli_displays_semantic_retry_without_final_answer() -> None:
         sql_agent=SQLAgent(model_client=sql_model, wren_tools=FakeWrenTools()),
         reviewer=Reviewer(model_client=reviewer_model),
         environ={},
+        verbose=True,
     )
 
     assert exit_code == 0
@@ -456,7 +475,8 @@ def test_cli_displays_semantic_retry_without_final_answer() -> None:
     assert not any("final answer" in output.lower() for output in outputs)
 
 
-def test_cli_displays_analyst_and_grounded_final_answer() -> None:
+@pytest.mark.parametrize("verbose", [False, True])
+def test_cli_displays_analyst_and_grounded_final_answer(verbose: bool) -> None:
     inputs = iter(["比较 Q2 和 Q3 各商品类别 GMV", "exit"])
     outputs: list[str] = []
     sql_model = SequenceModel(
@@ -524,14 +544,30 @@ def test_cli_displays_analyst_and_grounded_final_answer() -> None:
         reviewer=Reviewer(model_client=StaticReviewerModel()),
         analyst=Analyst(model_client=answer_model),
         environ={},
+        verbose=verbose,
     )
 
     assert exit_code == 0
-    assert sum("[SQL Agent]" in output for output in outputs) == 2
-    assert sum("[Reviewer]" in output for output in outputs) == 2
-    assert any("[Analyst]" in output for output in outputs)
-    assert any("[Final Answer]" in output for output in outputs)
-    assert any("category=A" in output for output in outputs)
+    if verbose:
+        assert sum("[SQL Agent]" in output for output in outputs) == 2
+        assert sum("[Reviewer]" in output for output in outputs) == 2
+        assert any("[Analyst]" in output for output in outputs)
+        assert any("[Final Answer]" in output for output in outputs)
+        assert any("category=A" in output for output in outputs)
+        assert any("[Run Summary]" in output for output in outputs)
+    else:
+        rendered = "\n".join(outputs)
+        assert outputs[:3] == [CLI_HEADER, CLI_QUESTION_HINT, CLI_VERBOSE_HINT]
+        assert CLI_ANALYZING in outputs
+        assert CLI_ANALYSIS_COMPLETE in outputs
+        assert "分析结论" in rendered
+        assert "关键证据" in rendered
+        for hidden in (
+            "[Planner]", "[SQL]", "[Reviewer]", "[Analyst]", "[Run Summary]",
+            "[Context]", "[Dry Plan]", "supports:", "data:q", "knowledge:",
+            "data:analysis-comparison:", "SELECT",
+        ):
+            assert hidden not in rendered
     assert not any("A 类是主要变化对象" in output for output in outputs)
 
 
@@ -541,4 +577,112 @@ def test_cli_quit_exits_without_creating_state() -> None:
     exit_code = run_cli(input_fn=lambda _: "quit", output_fn=outputs.append)
 
     assert exit_code == 0
-    assert outputs == ["Goodbye."]
+    assert outputs == [
+        CLI_HEADER, CLI_QUESTION_HINT, CLI_VERBOSE_HINT, HUMAN_GOODBYE,
+    ]
+
+
+def test_cli_default_configuration_failure_is_concise() -> None:
+    inputs = iter(["分析 7 月 GMV", "exit"])
+    outputs: list[str] = []
+
+    assert run_cli(
+        input_fn=lambda _: next(inputs), output_fn=outputs.append, environ={}
+    ) == 0
+
+    assert outputs == [
+        CLI_HEADER, CLI_QUESTION_HINT, CLI_VERBOSE_HINT,
+        HUMAN_CONFIGURATION_REQUIRED, HUMAN_GOODBYE,
+    ]
+
+
+def test_cli_default_unapproved_result_has_no_debug_output() -> None:
+    inputs = iter(["分析 7 月 GMV", "exit"])
+    outputs: list[str] = []
+    reviewer_response = json.dumps({
+        "decision": "fail",
+        "reason_summary": "Internal diagnostic: SQL has the wrong scope.",
+        "issues": [{"issue_type": "filter_mismatch", "description": "Wrong scope."}],
+        "retry_instruction": None,
+        "confidence": 0.95,
+    })
+
+    exit_code = run_cli(
+        input_fn=lambda _: next(inputs),
+        output_fn=outputs.append,
+        planner=Planner(model_client=StaticPlannerModel()),
+        sql_agent=SQLAgent(model_client=StaticSQLModel(), wren_tools=FakeWrenTools()),
+        reviewer=Reviewer(model_client=SequenceModel([reviewer_response])),
+        environ={},
+    )
+
+    assert exit_code == 0
+    assert outputs == [
+        CLI_HEADER, CLI_QUESTION_HINT, CLI_VERBOSE_HINT, CLI_ANALYZING,
+        HUMAN_ANSWER_UNAVAILABLE, HUMAN_GOODBYE,
+    ]
+
+
+def test_default_header_has_three_aligned_lines_and_no_ansi() -> None:
+    lines = CLI_HEADER.splitlines()
+    display_widths = [
+        sum(2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+            for char in line)
+        for line in lines
+    ]
+
+    assert len(lines) == 3
+    assert display_widths[0] == display_widths[1] == display_widths[2]
+    assert "DataPilot-Media" in lines[0]
+    assert "\x1b[" not in CLI_HEADER
+
+
+def test_human_answer_terminal_presentation_preserves_content() -> None:
+    answer = (
+        "## 分析结论\n\n- 播放成功率 95.00% → 50.00%，下降 45.00 个百分点。"
+        "\n\n## 证据边界\n\n- 相关性不能证明因果关系。"
+    )
+    plain = cli._present_human_answer(answer, color=False)
+    styled = cli._present_human_answer(answer, color=True)
+
+    assert "## " not in plain
+    assert "分析结论" in plain
+    assert "证据边界" in plain
+    assert "95.00% → 50.00%" in plain
+    assert "下降 45.00 个百分点" in plain
+    assert "\x1b[" not in plain
+    assert "\x1b[" in styled
+    assert re.sub(r"\x1b\[[0-9;]*m", "", styled) == plain
+
+
+def test_terminal_color_requires_tty_and_respects_no_color(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class TTY:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    with monkeypatch.context() as context:
+        context.setattr(cli.sys, "stdout", TTY())
+        assert cli._terminal_supports_color(print, {}) is True
+        assert cli._terminal_supports_color(print, {"NO_COLOR": "1"}) is False
+        assert cli._terminal_supports_color(print, {"TERM": "dumb"}) is False
+        assert cli._terminal_supports_color([].append, {}) is False
+
+
+@pytest.mark.parametrize("argv,verbose", [([], False), (["--verbose"], True)])
+def test_main_passes_presentation_flag_only(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], verbose: bool
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_cli(**kwargs: Any) -> int:
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "run_cli", fake_run_cli)
+
+    assert cli.main(argv) == 0
+    assert calls == [{"verbose": verbose}]

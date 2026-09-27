@@ -4,6 +4,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+import pytest
+
 from datapilot.agent.analyst import Analyst
 from datapilot.agent.follow_up import FollowUpResolver, SessionContextExtractor
 from datapilot.agent.graph import WorkflowRun, commit_session_context, run_session_turn
@@ -16,7 +18,16 @@ from datapilot.agent.state import (
     TaskItem,
     create_initial_state,
 )
-from datapilot.cli import SESSION_CLEARED, clear_session, process_input, run_cli
+from datapilot.cli import (
+    CLI_HEADER,
+    CLI_QUESTION_HINT,
+    CLI_VERBOSE_HINT,
+    HUMAN_GOODBYE,
+    HUMAN_SESSION_CLEARED,
+    clear_session,
+    process_input,
+    run_cli,
+)
 from datapilot.memory.session_memory import SessionMemoryStore
 from datapilot.tools.wren_tools import WrenQueryResult
 from datapilot.tracing.trace import EventType, TraceCollector
@@ -541,7 +552,8 @@ def test_session_trace_success() -> None:
     assert EventType.FOLLOW_UP_RESOLVED in second_events
 
 
-def test_cli_reuses_session() -> None:
+@pytest.mark.parametrize("verbose", [False, True])
+def test_cli_reuses_session(verbose: bool) -> None:
     store = SessionMemoryStore()
     inputs = iter(
         [
@@ -578,11 +590,16 @@ def test_cli_reuses_session() -> None:
         session_store=store,
         session_id="session-cli",
         environ={},
+        verbose=verbose,
     )
 
     assert exit_code == 0
-    assert any("Follow-up detected" in output for output in outputs)
-    assert any("[Resolved Query]" in output for output in outputs)
+    if verbose:
+        assert any("Follow-up detected" in output for output in outputs)
+        assert any("[Resolved Query]" in output for output in outputs)
+    else:
+        assert not any("[Session]" in output for output in outputs)
+        assert not any("[Resolved Query]" in output for output in outputs)
     assert store.get("session-cli").filters == {"region": ["华南"]}
 
 
@@ -602,7 +619,10 @@ def test_cli_reset_clears_session() -> None:
     )
 
     assert exit_code == 0
-    assert outputs == [SESSION_CLEARED, "Goodbye."]
+    assert outputs == [
+        CLI_HEADER, CLI_QUESTION_HINT, CLI_VERBOSE_HINT,
+        HUMAN_SESSION_CLEARED, HUMAN_GOODBYE,
+    ]
     assert store.get("session-cli").has_business_context is False
 
 

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import argparse
+import os
+import sys
+import unicodedata
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from typing import Any
@@ -32,6 +36,7 @@ from datapilot.agent.state import (
     TaskItem,
     create_initial_state,
 )
+from datapilot.cli_renderer import HUMAN_ANSWER_UNAVAILABLE, format_human_answer
 from datapilot.llm.openai_compatible import OpenAICompatiblePlannerModel
 from datapilot.memory.session_memory import SessionMemoryStore
 from datapilot.retrieval.integration import (
@@ -58,8 +63,125 @@ PLANNER_CONFIGURATION_HELP = "Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL."
 WREN_RUNTIME_NOT_CONFIGURED = "Wren runtime/data source is not configured."
 FINAL_ANSWER_UNAVAILABLE = "No grounded response was produced."
 SESSION_CLEARED = "Session context cleared."
+HUMAN_CONFIGURATION_REQUIRED = "模型尚未配置完成，请先完成配置后再提问。"
+HUMAN_WREN_NOT_CONFIGURED = "数据源尚未配置完成，暂时无法分析。"
+HUMAN_SESSION_CLEARED = "会话已清空。"
+HUMAN_GOODBYE = "再见。"
 ANALYST_BOUNDARY = FINAL_ANSWER_UNAVAILABLE
 REVIEW_BOUNDARY = FINAL_ANSWER_UNAVAILABLE
+
+_HEADER_CONTENT_WIDTH = 40
+_HEADER_TITLE = "─ DataPilot-Media "
+_HEADER_SUBTITLE = "音视频质量分析与故障排查智能体"
+_HEADER_SUBTITLE_CELLS = sum(
+    2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+    for char in _HEADER_SUBTITLE
+)
+CLI_HEADER = "\n".join(
+    (
+        "╭" + _HEADER_TITLE + "─" * (_HEADER_CONTENT_WIDTH - len(_HEADER_TITLE)) + "╮",
+        "│ "
+        + _HEADER_SUBTITLE
+        + " " * (_HEADER_CONTENT_WIDTH - 2 - _HEADER_SUBTITLE_CELLS)
+        + " │",
+        "╰" + "─" * _HEADER_CONTENT_WIDTH + "╯",
+    )
+)
+CLI_QUESTION_HINT = "输入问题，或输入 exit 退出"
+CLI_VERBOSE_HINT = "使用 --verbose 查看完整执行链路"
+CLI_ANALYZING = "● 正在分析…"
+CLI_ANALYSIS_COMPLETE = "✓ 分析完成"
+
+_ANSI_RESET = "\x1b[0m"
+_PALETTE = {
+    "brand": "\x1b[38;5;110m",
+    "border": "\x1b[38;5;103m",
+    "heading": "\x1b[38;5;110m",
+    "evidence": "\x1b[38;5;108m",
+    "success": "\x1b[38;5;108m",
+    "uncertain": "\x1b[38;5;180m",
+    "boundary": "\x1b[38;5;173m",
+    "body": "\x1b[38;5;250m",
+    "muted": "\x1b[38;5;245m",
+}
+
+
+def _terminal_supports_color(
+    output_fn: Callable[[str], None],
+    environ: Mapping[str, str] | None,
+) -> bool:
+    """Use ANSI only for the actual interactive stdout, never captured output."""
+
+    if output_fn is not print:
+        return False
+    if "NO_COLOR" in os.environ or (environ is not None and "NO_COLOR" in environ):
+        return False
+    if os.environ.get("TERM", "").lower() == "dumb":
+        return False
+    if environ is not None and environ.get("TERM", "").lower() == "dumb":
+        return False
+    if os.name == "nt" and not any(
+        (
+            os.environ.get("WT_SESSION"),
+            os.environ.get("ANSICON"),
+            os.environ.get("ConEmuANSI") == "ON",
+            os.environ.get("TERM_PROGRAM"),
+            os.environ.get("TERM"),
+            (environ or {}).get("TERM"),
+        )
+    ):
+        return False
+    return sys.stdout.isatty()
+
+
+def _color(text: str, name: str, *, enabled: bool) -> str:
+    return f"{_PALETTE[name]}{text}{_ANSI_RESET}" if enabled else text
+
+
+def _welcome_header(*, color: bool) -> str:
+    if not color:
+        return CLI_HEADER
+    top, middle, bottom = CLI_HEADER.splitlines()
+    prefix, brand, suffix = top.partition("DataPilot-Media")
+    return "\n".join(
+        (
+            _color(prefix, "border", enabled=True)
+            + _color(brand, "brand", enabled=True)
+            + _color(suffix, "border", enabled=True),
+            _color(middle[:2], "border", enabled=True)
+            + _color(middle[2:-1], "body", enabled=True)
+            + _color(middle[-1], "border", enabled=True),
+            _color(bottom, "border", enabled=True),
+        )
+    )
+
+
+def _present_human_answer(answer: str, *, color: bool) -> str:
+    """Style only the formatter's known headings and bullets; keep wording intact."""
+
+    heading_colors = {
+        "关键证据": "evidence",
+        "可能原因": "uncertain",
+        "证据边界": "boundary",
+    }
+    lines: list[str] = []
+    for line in answer.splitlines():
+        if line.startswith("## "):
+            title = line[3:]
+            tone = heading_colors.get(title, "heading")
+            lines.append(_color("  " + title, tone, enabled=color))
+        elif line.startswith("- "):
+            lines.append(
+                "  "
+                + _color("•", "border", enabled=color)
+                + " "
+                + _color(line[2:], "body", enabled=color)
+            )
+        elif line.startswith("  ") and line.strip():
+            lines.append("  " + _color(line, "body", enabled=color))
+        else:
+            lines.append(line)
+    return "\n".join(lines)
 
 
 @dataclass(slots=True)
@@ -308,8 +430,9 @@ def run_cli(
     tool_registry: ToolRegistry | None = None,
     tool_router: ToolRouter | None = None,
     environ: Mapping[str, str] | None = None,
+    verbose: bool = False,
 ) -> int:
-    """Run a reusable in-memory session until user exit."""
+    """Run one session; verbose controls presentation only."""
 
     active_planner = planner
     active_sql_agent = sql_agent
@@ -330,21 +453,26 @@ def run_cli(
     )
     active_session = active_store.create(session_id)
     active_session_id = active_session.session_id
+    use_color = not verbose and _terminal_supports_color(output_fn, environ)
+    if not verbose:
+        output_fn(_welcome_header(color=use_color))
+        output_fn(_color(CLI_QUESTION_HINT, "muted", enabled=use_color))
+        output_fn(_color(CLI_VERBOSE_HINT, "muted", enabled=use_color))
 
     while True:
         try:
             raw_input = input_fn(PROMPT)
         except EOFError:
-            output_fn("Goodbye.")
+            output_fn("Goodbye." if verbose else HUMAN_GOODBYE)
             return 0
         except KeyboardInterrupt:
             output_fn("")
-            output_fn("Goodbye.")
+            output_fn("Goodbye." if verbose else HUMAN_GOODBYE)
             return 0
 
         query = raw_input.strip()
         if query.lower() in EXIT_COMMANDS:
-            output_fn("Goodbye.")
+            output_fn("Goodbye." if verbose else HUMAN_GOODBYE)
             return 0
         if query.lower() in RESET_COMMANDS:
             reset_trace = TraceCollector()
@@ -353,7 +481,7 @@ def run_cli(
                 active_session_id,
                 trace=reset_trace,
             )
-            output_fn(SESSION_CLEARED)
+            output_fn(SESSION_CLEARED if verbose else HUMAN_SESSION_CLEARED)
             continue
         if not query:
             continue
@@ -362,8 +490,11 @@ def run_cli(
             try:
                 model_client = OpenAICompatiblePlannerModel.from_env(environ)
             except PlannerError:
-                output_fn(PLANNER_CONFIGURATION_REQUIRED)
-                output_fn(PLANNER_CONFIGURATION_HELP)
+                if verbose:
+                    output_fn(PLANNER_CONFIGURATION_REQUIRED)
+                    output_fn(PLANNER_CONFIGURATION_HELP)
+                else:
+                    output_fn(HUMAN_CONFIGURATION_REQUIRED)
                 continue
             active_planner = Planner(model_client=model_client)
         if active_resolver is None:
@@ -374,6 +505,9 @@ def run_cli(
             active_extractor = SessionContextExtractor(
                 model_client=active_planner.model_client,
             )
+
+        if not verbose:
+            output_fn(_color(CLI_ANALYZING, "brand", enabled=use_color))
 
         previous_session = active_store.get(active_session_id)
         initialized = process_input(
@@ -422,24 +556,37 @@ def run_cli(
                 planning_context=planning_context,
             )
         except (PlannerError, FollowUpResolutionError) as exc:
-            output_fn(f"Planner failed: {exc}")
-            _print_run_summary(output_fn, initialized.trace)
+            if verbose:
+                output_fn(f"Planner failed: {exc}")
+                _print_run_summary(output_fn, initialized.trace)
+            else:
+                output_fn(HUMAN_ANSWER_UNAVAILABLE)
             continue
-        output_fn(format_planner_result(planning.initial_result))
+        if verbose:
+            output_fn(format_planner_result(planning.initial_result))
         if initialized.state["was_follow_up"]:
-            output_fn("[Session]\nFollow-up detected")
+            if verbose:
+                output_fn("[Session]\nFollow-up detected")
             if not planning.can_execute or planning.resolution is None:
                 reason = planning.error or "Follow-up requires clarification."
-                output_fn(f"[Session]\nCannot resolve follow-up: {reason}")
-                _print_run_summary(output_fn, initialized.trace)
+                if verbose:
+                    output_fn(f"[Session]\nCannot resolve follow-up: {reason}")
+                    _print_run_summary(output_fn, initialized.trace)
+                else:
+                    output_fn("请补充本次问题的分析对象或时间范围，再试一次。")
                 continue
-            output_fn(f"[Resolved Query]\n{initialized.state['resolved_query']}")
-            if planning.effective_result is not None:
-                output_fn(format_planner_result(planning.effective_result))
+            if verbose:
+                output_fn(f"[Resolved Query]\n{initialized.state['resolved_query']}")
+                if planning.effective_result is not None:
+                    output_fn(format_planner_result(planning.effective_result))
 
         if active_sql_agent is None:
             if active_wren_tools is None:
-                output_fn(WREN_RUNTIME_NOT_CONFIGURED)
+                output_fn(
+                    WREN_RUNTIME_NOT_CONFIGURED
+                    if verbose
+                    else HUMAN_WREN_NOT_CONFIGURED
+                )
                 continue
             active_sql_agent = SQLAgent(
                 model_client=active_planner.model_client,
@@ -467,32 +614,51 @@ def run_cli(
                 tool_router=active_tool_router,
             )
         except (SQLAgentError, ReviewerError, AnalystError) as exc:
-            output_fn(f"DataPilot workflow failed: {exc}")
-            _print_run_summary(output_fn, initialized.trace)
+            if verbose:
+                output_fn(f"DataPilot workflow failed: {exc}")
+                _print_run_summary(output_fn, initialized.trace)
+            else:
+                output_fn(HUMAN_ANSWER_UNAVAILABLE)
             continue
-        for query_run in workflow.reviewed_queries:
-            task = task_by_id[query_run.task_id]
-            for index, sql_result in enumerate(query_run.sql_results):
-                output_fn(
-                    format_sql_result(
-                        task,
-                        sql_result,
-                        is_semantic_retry=index > 0,
-                    )
-                )
-                if index < len(query_run.review_results):
+        if verbose:
+            for query_run in workflow.reviewed_queries:
+                task = task_by_id[query_run.task_id]
+                for index, sql_result in enumerate(query_run.sql_results):
                     output_fn(
-                        format_reviewer_result(query_run.review_results[index])
+                        format_sql_result(
+                            task,
+                            sql_result,
+                            is_semantic_retry=index > 0,
+                        )
                     )
+                    if index < len(query_run.review_results):
+                        output_fn(
+                            format_reviewer_result(query_run.review_results[index])
+                        )
         if any(not query_run.approved for query_run in workflow.reviewed_queries):
-            _print_run_summary(output_fn, initialized.trace)
+            if verbose:
+                _print_run_summary(output_fn, initialized.trace)
+            else:
+                output_fn(HUMAN_ANSWER_UNAVAILABLE)
             continue
-        for analysis_result in workflow.analysis_results:
-            output_fn(format_analysis_result(analysis_result))
+        if verbose:
+            for analysis_result in workflow.analysis_results:
+                output_fn(format_analysis_result(analysis_result))
         if workflow.final_answer_result is None:
-            output_fn(FINAL_ANSWER_UNAVAILABLE)
-        else:
+            output_fn(
+                FINAL_ANSWER_UNAVAILABLE if verbose else HUMAN_ANSWER_UNAVAILABLE
+            )
+        elif verbose:
             output_fn(format_final_answer(workflow.final_answer_result))
+        else:
+            human_answer = format_human_answer(workflow.final_answer_result)
+            if human_answer == HUMAN_ANSWER_UNAVAILABLE:
+                output_fn(human_answer)
+            else:
+                output_fn(
+                    _color(CLI_ANALYSIS_COMPLETE, "success", enabled=use_color)
+                )
+                output_fn(_present_human_answer(human_answer, color=use_color))
         if planning.effective_result is not None:
             try:
                 commit_session_context(
@@ -505,14 +671,25 @@ def run_cli(
                     resolution=planning.resolution,
                 )
             except SessionContextError as exc:
-                output_fn(f"Session memory update failed: {exc}")
-        _print_run_summary(output_fn, initialized.trace)
+                if verbose:
+                    output_fn(f"Session memory update failed: {exc}")
+                else:
+                    output_fn("会话记忆未能更新，后续提问请提供完整条件。")
+        if verbose:
+            _print_run_summary(output_fn, initialized.trace)
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """CLI module entry point."""
 
-    return run_cli()
+    parser = argparse.ArgumentParser(description="DataPilot 交互式分析助手")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="显示任务规划、查询、证据和运行摘要等调试信息",
+    )
+    args = parser.parse_args(argv)
+    return run_cli(verbose=args.verbose)
 
 
 if __name__ == "__main__":
